@@ -10,14 +10,30 @@ These skills are designed to **scan a codebase first**, then produce:
 
 ## Install
 
-Replace `<owner>` with your GitHub account or org name.
+Use the exact repo path:
 
 ```bash
-npx skills add <owner>/dy_skills@i18n-structure-refactor -y -g
-npx skills add <owner>/dy_skills@framework-page-standardizer -y -g
-npx skills add <owner>/dy_skills@incident-runbook-from-code -y -g
-npx skills add <owner>/dy_skills@content-pipeline-migrator -y -g
-npx skills add <owner>/dy_skills@multi-repo-sync-guard -y -g
+npx skills add Ycode-bot/dy_skills@i18n-structure-refactor -y -g
+npx skills add Ycode-bot/dy_skills@framework-page-standardizer -y -g
+npx skills add Ycode-bot/dy_skills@incident-runbook-from-code -y -g
+npx skills add Ycode-bot/dy_skills@content-pipeline-migrator -y -g
+npx skills add Ycode-bot/dy_skills@multi-repo-sync-guard -y -g
+```
+
+Install all at once:
+
+```bash
+npx skills add Ycode-bot/dy_skills@i18n-structure-refactor -y -g && \
+npx skills add Ycode-bot/dy_skills@framework-page-standardizer -y -g && \
+npx skills add Ycode-bot/dy_skills@incident-runbook-from-code -y -g && \
+npx skills add Ycode-bot/dy_skills@content-pipeline-migrator -y -g && \
+npx skills add Ycode-bot/dy_skills@multi-repo-sync-guard -y -g
+```
+
+Verify installation:
+
+```bash
+ls ~/.agents/skills
 ```
 
 ## Included Skills
