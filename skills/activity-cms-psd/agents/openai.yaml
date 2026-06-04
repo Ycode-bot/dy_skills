@@ -1,0 +1,3 @@
+display_name: Activity CMS PSD
+short_description: Convert activity PSDs into activityincms JSON drafts.
+default_prompt: Convert this activity PSD into an activityincms import package, choose or confirm an output directory, then produce assets, inspect files, cms-page-config.json, theme.md, and import notes.
