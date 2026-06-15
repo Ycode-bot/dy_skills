@@ -11,6 +11,13 @@ Use this skill when converting a PSD activity design into an activityincms impor
 
 The recommended input is a lightly annotated PSD that follows `references/psd-annotation-guide.md`. Treat `cms:` / `asset:` / `text:` / `style:` / `tab:` annotations as the source of truth. Ordinary unannotated PSDs are supported only as a low-confidence fallback and must produce clear candidate notes instead of pretending the mapping is certain.
 
+For new PSDs, prefer the simplified Chinese annotations:
+
+- `切图:<assetName>` or `切图:<assetName>[widthxheight]` for required PNG exports.
+- `组件:<Chinese component label>` for real CMS component generation.
+
+Cut annotations and component annotations are independent but complementary. `组件:` drives the JSON component tree. `切图:` drives the asset package that operators use to replace the generated component's image fields.
+
 ## Output Contract
 
 Create the output package in a deterministic directory.
@@ -29,26 +36,28 @@ When available, run:
 scripts/create_package.py <psd> --out <output-dir>
 ```
 
-If `--out` is omitted, the script creates the default package directory. The package folder must be shaped like:
+If `--out` is omitted, the script creates the default package directory. The default package folder must be shaped like:
 
 ```txt
 <output-parent>/<psd-file-stem>-<YYYYMMDDHHMM>/
   assets/
-    full-page.png
-    hero.png
-    intro-rules.png
-    draw-section.png
-    pool-section.png
-  inspect/
-    preview.png
-    psd-inspect.json
-    layers.json
-    slices.json
-    export-report.json
-    component-detection.json
   cms-page-config.json
+  theme.json
   theme.md
-  import-notes.md
+```
+
+When invoked with `--debug`, the package may additionally include:
+
+```txt
+inspect/
+  preview.png
+  psd-inspect.json
+  layers.json
+  slices.json
+  export-report.json
+  component-detection.json
+cms-page-config.local-preview.json
+import-notes.md
 ```
 
 `cms-page-config.json` must use the activityincms whole-page import format:
@@ -75,10 +84,19 @@ If `--out` is omitted, the script creates the default package directory. The pac
 
 Component entries must be sparse overrides, not full CMS default configs. Use `componentName`, optional `config`, optional `styleConfig`, and optional `meta`.
 
-For local sliced assets, use `asset://name` placeholders in JSON and explain in `import-notes.md` that operators must upload assets and replace them with CDN URLs before save/preview.
+Each PSD module must generate at most one CMS component in `components`. `组件:` annotations should generate real activityincms components with blank business IDs and todos, even when backend configuration is incomplete. Do not output both a static `piccomponent` visual reference and a real functional component for the same annotated module. Use `piccomponent` only for `切图:`-only visual modules or low-confidence fallback modules.
 
-Default asset export uses Python `psd-tools`, not Adobe Photoshop. It must read the PSD layer/group tree, write it to `inspect/layers.json`, and prioritize annotated groups/layers:
+For local sliced assets, use `asset://name` placeholders in JSON and explain in component `meta.todos` that operators must upload assets and replace them with CDN URLs before save/preview.
 
+For local testing, the script may also create `cms-page-config.local-preview.json` when invoked with both `--debug` and `--local-asset-base <url>`. This file should keep the same real component tree as `cms-page-config.json`, replacing only `asset://` references with local HTTP image URLs. It must not downgrade recognized `组件:` modules to images.
+
+Static preview components must preserve PSD vertical layout. When annotated modules overlap or touch in PSD coordinates, merge them into one layout preview slice so activityincms can render the page correctly with normal top-to-bottom `piccomponent` flow.
+
+Default asset export uses Python `psd-tools`, not Adobe Photoshop. It must read the PSD layer/group tree and prioritize annotated groups/layers. In `--debug` mode, also write the tree to `inspect/layers.json`.
+
+- `切图:<assetName>` exports the layer/group as a PNG using its actual bounds.
+- `切图:<assetName>[<width>x<height>]` exports the layer/group as a PNG with an optional target-size check.
+- `组件:<Chinese label>` generates a real CMS component with sparse config overrides and blank business IDs.
 - `cms:<componentName>#<localName>` creates or candidates a CMS component.
 - `asset:<fieldName>` marks an exportable image asset.
 - `text:<fieldName>` marks editable text/config.
@@ -87,9 +105,9 @@ Default asset export uses Python `psd-tools`, not Adobe Photoshop. It must read 
 
 If annotations are missing, fallback name matching may inspect clearly named layers/groups such as `头图`, `banner`, `hero`, `倒计时`, `规则`, `抽奖`, and `奖池`, but those matches must be lower confidence unless the component boundary is unambiguous.
 
-If a layer/group is missing, too broad, hidden, or cannot be composited by `psd-tools`, fall back to composite-image region slicing. Fallback slices must still generate `full-page.png`, `hero.png`, `intro-rules.png`, `draw-section.png`, and `pool-section.png`, and record slice coordinates in `inspect/slices.json`.
+If a layer/group is missing, too broad, hidden, or cannot be composited by `psd-tools`, record the failure in debug reports. Composite-image fallback slices are generated only in `--debug` mode.
 
-For every generated asset, write `inspect/export-report.json` with:
+In `--debug` mode, write `inspect/export-report.json` for every generated asset with:
 
 - `sourceType`: `psd-tools-layer`, `psd-tools-layer-group`, or `composite-slice-fallback`
 - `layerPath` when a layer/group was used
@@ -97,12 +115,14 @@ For every generated asset, write `inspect/export-report.json` with:
 - `confidence`
 - `fallbackReason` when fallback was used
 
-For every detected module or candidate, write `inspect/component-detection.json` with:
+In `--debug` mode, write `inspect/component-detection.json` for every detected module or candidate with:
 
 - source layer path
 - recommended `componentName`
 - confidence
 - whether the module was generated into JSON
+- whether it was generated as a real component or downgraded to a static preview
+- preview slice bounds and merge information when static modules are merged for layout
 - low-confidence or fallback reason when relevant
 
 Photoshop is not required for operators. If a developer later adds a Photoshop-backed exporter, it should be optional only and must not replace `psd-tools` as the default.
@@ -145,23 +165,29 @@ If the skill is not automatically discovered in a conversation, use the explicit
    - composite preview
    - readable text layers or extracted XMP text
    - whether width is 750 or a 2x 1500 design
-   - Run `scripts/create_package.py <psd> --out <output>` from this skill folder to create the package directory, `inspect/preview.png`, `inspect/psd-inspect.json`, `inspect/layers.json`, `inspect/slices.json`, `inspect/export-report.json`, and assets.
+   - Run `scripts/create_package.py <psd> --out <output>` from this skill folder to create the package directory, assets, theme files, and `cms-page-config.json`.
+   - Use `--debug` only when you need `inspect/` reports, fallback slices, import notes, or local preview JSON.
    - The default command uses `--engine psd-tools`. Use `--engine composite` only for debugging fallback slicing.
 2. Identify page modules from top to bottom:
    - First parse explicit `cms:` annotations.
    - Then parse `tab:`, `asset:`, `text:`, and `style:` children.
    - Use fallback name matching only when annotations are absent.
 3. Map modules to existing activityincms components:
-   - high confidence: generate the real functional component
-   - low confidence: write a candidate to `component-detection.json` and add a todo
+   - `切图:` annotations: export PNG assets and record target/actual dimensions
+   - `组件:` annotations: generate real CMS components with todos for missing IDs/backend config
+   - `切图:` annotations: export assets and attach related assets to nearby/generated components
+   - high confidence static module with no component annotation: generate `piccomponent`
+   - backend-dependent module without fine-grained annotations: still generate the real component, but leave unknown image/config fields empty and add todos
+   - low confidence: add a todo to `cms-page-config.json`; in `--debug` mode also write a candidate to `component-detection.json`
    - never invent a component name
 4. Generate JSON:
    - leave all business IDs blank
+   - import each PSD module once only
    - include `meta.confidence`, `meta.source`, `meta.alternatives`, and `meta.todos` when useful
    - use `tabComp.config.tabs[].content[]` for nested tab content
 5. Generate handoff docs:
    - `theme.md`: colors, typography notes, page style, component color recommendations
-   - `import-notes.md`: mapping decisions, low-confidence areas, missing IDs, asset upload reminders
+   - debug-only `import-notes.md`: mapping decisions, low-confidence areas, missing IDs, asset upload reminders
 
 ## Component Mapping Rules
 
@@ -206,6 +232,20 @@ Add todos such as:
 
 Annotated PSD mode is the preferred workflow. UI should follow `references/psd-annotation-guide.md`.
 
+Preferred simplified format:
+
+```txt
+切图:头图[750x900]
+切图:规则背景
+切图:抽奖标题[700x180]
+
+组件:倒计时
+组件:奖池升级
+组件:榜单
+```
+
+Legacy detailed format remains supported:
+
 ```txt
 cms:piccomponent#hero
   asset:url
@@ -217,6 +257,10 @@ cms:countDown#mainCountdown
   style:textColor
 
 cms:drawPool2
+  asset:barrageVisualReference
+  text:get
+  style:barrageBg
+  style:barrageColor
   asset:drawImg
   asset:poolImg
   text:drawText1
@@ -234,6 +278,7 @@ Hard rules:
 
 - Do not put countdown layers inside a banner image component.
 - Do not merge banner, countdown, tabs, draw, rank, and rules into one large image group.
+- Do not split drawPool2's floating award notice / barrage into a standalone `piccomponent`; keep it under `cms:drawPool2` with `asset:barrageVisualReference`, `text:get`, `style:barrageBg`, and `style:barrageColor`.
 - Do not write business IDs in PSD.
 - Only `asset:` layers/groups are guaranteed image exports.
 
@@ -248,6 +293,7 @@ For `/Users/yangdongyu/Downloads/遗迹-奖池升级(金币文案）.psd`:
   - hero/rules/decorations -> `piccomponent`
   - main tabs -> `tabComp`
   - upgrade prize pool tab -> `drawPool2`, alternative `drawPool`
+  - floating award notice above the draw title -> part of `drawPool2`, not a standalone picture component
   - daily task and leaderboard tabs -> empty/candidate tabs with todos unless exact component fit is confirmed
 
 ## Quality Bar

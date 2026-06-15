@@ -1,85 +1,110 @@
-# Activity CMS PSD Annotation Guide
+# Activity CMS PSD 标注规范
 
-本文档给 UI、运营和活动配置同学使用。目标是让 PSD 成为 Skill 可以稳定解析的结构化输入，而不是让 Skill 对混乱设计稿做猜测切图。
+本文档给 UI 和运营使用。第一阶段目标是让 Skill 稳定完成复杂 PSD 的切图、主题色提取、真实 CMS 组件识别，并生成可导入 activityincms 的整页 JSON。
 
-## Core Principle
+## 核心原则
 
-PSD must describe the CMS component structure.
+切图就是切图，组件就是组件。
 
-PSD 不是纯视觉截图。每个可编辑 CMS 模块都应该是独立图层组，并使用轻量标注命名。Skill 只对规范标注做高置信生成；未标注或混放的内容只进入候选报告。
+不要把“要导出的图片”和“后台组件类型”写进同一个复杂名字里。Skill 会分别识别：
 
-## Required Syntax
+- `切图:`：一定要导出的图片素材。
+- `组件:`：这个区域要生成哪个真实 CMS 组件。
 
-Use these prefixes in layer/group names:
+二者不强制写在同一个名字里，但要一起交付：`组件:` 决定 JSON 里的真实组件，`切图:` 决定运营后续替换组件图片字段时可用的素材包。
 
-| Prefix | Meaning | Example |
-|---|---|---|
-| `cms:` | CMS component group | `cms:countDown#mainCountdown` |
-| `asset:` | Exportable image asset | `asset:url` |
-| `text:` | Editable text/config reference | `text:actTime` |
-| `style:` | Style/color reference | `style:numColor` |
-| `tab:` | Tab name inside `tabComp` | `tab:Leaderboard` |
+## 切图命名
 
-Format:
+格式：
 
 ```txt
-cms:<componentName>#<localName>
+切图:<素材名>
+切图:<素材名>[宽x高]
 ```
 
-- `componentName` must match the CMS component catalog, for example `piccomponent`, `countDown`, `tabComp`, `drawPool2`.
-- `localName` is a readable local alias, for example `hero`, `mainCountdown`, `leaderboard`.
-- Do not put spaces in `componentName`. Use English camelCase exactly as listed in `component-catalog.md`.
+示例：
 
-## Correct Example
+```txt
+切图:头图
+切图:头图[750x300]
+切图:规则背景
+切图:抽奖标题[700x180]
+切图:奖池进度
+```
+
+规则：
+
+- 只有 `切图:` 开头的图层或组会被强制导出 PNG。
+- `[宽x高]` 是可选的。
+- 不写尺寸时，按 PSD 图层/组的实际 bounds 导出。
+- 写尺寸时，Skill 会尽量按目标尺寸导出；如果比例不一致，不自动裁切或拉伸，会按实际尺寸导出并在报告里提示。
+- 尺寸格式统一使用半角或全角括号都可以：`[750x300]`、`［750x300］`。
+
+## 组件命名
+
+格式：
+
+```txt
+组件:<中文组件名>
+```
+
+示例：
+
+```txt
+组件:奖池升级
+组件:倒计时
+组件:榜单
+组件:任务
+组件:报名
+组件:礼物兑换
+```
+
+规则：
+
+- `组件:` 会进入 `cms-page-config.json`，生成真实 activityincms 组件。
+- 组件识别结果会写入 `cms-page-config.json`；如果研发使用 `--debug`，也会写入 `inspect/component-detection.json` 方便追溯。
+- 如果组件依赖后台 ID 或接口数据，Skill 会把相关字段留空，并在 `meta.todos` 中提示运营补齐。
+- 业务 ID 不写在 PSD 里，由运营后续在 CMS 或 JSON 中补。
+
+常用映射：
+
+| PSD 标注 | CMS componentName | 说明 |
+|---|---|---|
+| `组件:奖池升级` | `drawPool2` | 274 - 奖池升级 节日主题 |
+| `组件:倒计时` | `countDown` | 倒计时组件 |
+| `组件:榜单` | `commonGiftRank` | 通用礼物榜单候选 |
+| `组件:任务` | `taskDraw` | 任务抽奖候选 |
+| `组件:报名` | `signUp2` | 报名组件候选 |
+| `组件:礼物兑换` | `giftExchange` | 礼物兑换候选 |
+| `组件:盲盒` | `blackbox` | 盲盒抽奖 |
+
+## 推荐 PSD 结构
 
 ```txt
 画板 1
-  page:Redline Rivals
+  切图:头图[750x900]
+  切图:倒计时背景
+  组件:倒计时
 
-  cms:piccomponent#hero
-    asset:url
-      hero background
-      title art
-      decorative objects
+  切图:主选项卡
+  组件:奖池升级
+  切图:飘屏中奖通告
+  切图:抽奖标题[700x180]
+  切图:抽奖面板
+  切图:奖池标题[750x180]
+  切图:奖池进度
 
-  cms:countDown#mainCountdown
-    text:actTime
-    style:backgroundColor
-    style:numBg
-    style:numColor
-    style:numBorder
-    style:textColor
-    countdown visual reference
+  组件:榜单
+  切图:榜单背景
 
-  cms:tabComp#mainTabs
-    tab:Upgrade Prize Pool
-      cms:drawPool2#upgradePrizePool
-        text:drawText1
-        text:drawText2
-        style:buttonColor
-    tab:Daily Task
-      cms:taskDraw#dailyTask
-    tab:Leaderboard
-      cms:commonGiftRank#leaderboard
-
-  cms:piccomponent#rules
-    asset:url
+  切图:规则背景
 ```
 
-## Hard Rules
+## 业务 ID
 
-- Do not put `cms:countDown` inside `cms:piccomponent#hero`.
-- Do not merge banner, countdown, tab, draw, rank, and rules into one large image group.
-- Do not write business IDs in PSD.
-- Do not name a visual-only decorative group as a functional CMS component.
-- Keep the layer order top-to-bottom matching the page order.
-- Keep text layers editable when the text should become CMS config.
+UI 不需要提供后台 ID。
 
-## Business IDs
-
-UI does not provide backend IDs.
-
-Do not write these in PSD:
+不要在 PSD 中写：
 
 ```txt
 actId
@@ -92,104 +117,52 @@ signupId
 drawId
 ```
 
-Skill will leave these blank in JSON. Operators fill them in JSON or the CMS right panel.
+这些由运营在 CMS 或 JSON 中补齐。
 
-## Asset Rules
+## 错误示例
 
-Only groups/layers marked with `asset:` are guaranteed to be exported as PNG files.
-
-Recommended asset naming:
+### 一个大组切全页
 
 ```txt
-asset:url
-asset:bg
-asset:buttonImg
-asset:titleImg
-asset:ruleImg
+切图:整页
+  所有内容
 ```
 
-For `piccomponent`, the main image should usually be:
+问题：运营后续无法替换局部素材，也无法判断组件结构。
+
+### 尺寸写在备注里
 
 ```txt
-cms:piccomponent#hero
-  asset:url
+头图 750 300
 ```
 
-The generated JSON will reference:
-
-```json
-"url": ["asset://hero"]
-```
-
-Operators must upload the exported PNG to CDN and replace `asset://hero` before save/preview.
-
-## Text and Style Rules
-
-Use `text:` for values that should be editable or used as CMS config:
+问题：Skill 无法稳定解析。正确写法：
 
 ```txt
-text:actTime
+切图:头图[750x300]
+```
+
+### 把组件当切图
+
+```txt
+切图:奖池升级
+```
+
+如果只是要素材，可以这样写；如果要让 JSON 里生成真实后台组件，还需要单独写：
+
+```txt
+组件:奖池升级
+```
+
+## 兼容旧格式
+
+旧格式仍可识别，但不再推荐给 UI 使用：
+
+```txt
+cms:drawPool2#upgradePrizePool
+asset:drawImg
 text:drawText1
-text:record
+style:contBg
 ```
 
-Use `style:` for visual style hints:
-
-```txt
-style:backgroundColor
-style:numBg
-style:numColor
-style:numBorder
-style:textColor
-```
-
-Skill may infer colors from the marked visual reference, but operators should still review `theme.md`.
-
-## Bad Examples
-
-### Countdown Inside Banner
-
-```txt
-cms:piccomponent#hero
-  title art
-  background
-  countdown numbers
-```
-
-Why this is wrong: Skill cannot know whether the countdown should be static image or editable CMS `countDown`.
-
-Correct:
-
-```txt
-cms:piccomponent#hero
-cms:countDown#mainCountdown
-```
-
-### One Huge Screenshot Group
-
-```txt
-cms:piccomponent#fullPage
-  everything
-```
-
-Why this is wrong: It removes editability and prevents CMS component mapping.
-
-### Business IDs in PSD
-
-```txt
-field:actId=1200
-field:testId=1716
-```
-
-Why this is wrong: IDs are operational/backend configuration, not UI design.
-
-## When Unsure
-
-If UI cannot determine the exact CMS component, use a candidate marker:
-
-```txt
-candidate:leaderboard#mainRank
-candidate:draw#mainLottery
-```
-
-Skill should put this into `component-detection.json` and `import-notes.md` for operations to confirm.
+后续新 PSD 优先使用中文前缀。

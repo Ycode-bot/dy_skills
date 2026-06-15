@@ -13,7 +13,7 @@ import re
 from html import unescape
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 
 def extract_text_hints(psd_path: Path) -> list[str]:
@@ -54,6 +54,24 @@ def extract_text_hints(psd_path: Path) -> list[str]:
     return cleaned[:300]
 
 
+def open_composite_image(psd_path: Path) -> tuple[Image.Image, str, int, str]:
+    try:
+        image = Image.open(psd_path)
+        frames = getattr(image, "n_frames", 1)
+        return image.convert("RGBA"), image.mode, frames, "pillow"
+    except UnidentifiedImageError:
+        try:
+            from psd_tools import PSDImage
+        except ImportError as exc:
+            raise RuntimeError("Pillow cannot read this PSD and psd-tools is not installed") from exc
+
+        psd = PSDImage.open(psd_path)
+        composite = psd.composite()
+        if composite is None:
+            raise RuntimeError("psd-tools could not composite this PSD")
+        return composite.convert("RGBA"), "PSD", 1, "psd-tools"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Inspect a PSD and write preview/text metadata.")
     parser.add_argument("psd", help="PSD file path")
@@ -65,9 +83,7 @@ def main() -> None:
     out_dir = Path(args.out).expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    image = Image.open(psd_path)
-    frames = getattr(image, "n_frames", 1)
-    composite = image.convert("RGBA")
+    composite, source_mode, frames, engine = open_composite_image(psd_path)
     scale = args.preview_width / composite.width
     preview_height = max(1, int(composite.height * scale))
     preview = composite.resize((args.preview_width, preview_height), Image.LANCZOS)
@@ -79,8 +95,9 @@ def main() -> None:
         "sizeBytes": psd_path.stat().st_size,
         "width": composite.width,
         "height": composite.height,
-        "mode": image.mode,
+        "mode": source_mode,
         "frames": frames,
+        "inspectEngine": engine,
         "cmsWidth": 750,
         "scaleToCms": round(750 / composite.width, 4),
         "preview": str(preview_path),

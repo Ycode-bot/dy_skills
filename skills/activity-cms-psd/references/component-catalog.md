@@ -132,7 +132,7 @@ Notes:
 | cntDrawRecord | 253 - 金币抽奖 - 滚动记录 / 个人记录 / 累计次数进度 | Lottery or draw module | cms:cntDrawRecord#drawModule | Usually requires operator backend IDs |
 | cntDraw | 253 - 金币抽奖 | Lottery or draw module | cms:cntDraw#drawModule | Usually requires operator backend IDs |
 | drawPool | 274 - 奖池升级 | Lottery or draw module | cms:drawPool#drawModule | Usually requires operator backend IDs |
-| drawPool2 | 274 - 奖池升级 节日主题 | Lottery or draw module | cms:drawPool2#drawModule | Usually requires operator backend IDs |
+| drawPool2 | 274 - 奖池升级 节日主题 | Lottery/prize-pool module, including floating award notice / barrage | cms:drawPool2#drawModule | Includes `get`, `barrageBg`, `barrageColor`; requires operator backend IDs |
 | shareCake | 277 - 收集物品瓜分蛋糕 | Activity CMS component | cms:shareCake#moduleName | Usually visual/config only |
 | auction | 300 - 低价竞拍 | Activity CMS component | cms:auction#moduleName | Usually visual/config only |
 | xmasGift | 307 - 圣诞节礼物交换 | Gift or reward module | cms:xmasGift#moduleName | Usually visual/config only |

@@ -19,6 +19,7 @@ npx skills add Ycode-bot/dy_skills@incident-runbook-from-code -y -g
 npx skills add Ycode-bot/dy_skills@content-pipeline-migrator -y -g
 npx skills add Ycode-bot/dy_skills@multi-repo-sync-guard -y -g
 npx skills add Ycode-bot/dy_skills@activity-cms-psd -y -g
+npx skills add Ycode-bot/dy_skills@workplace-viral-copywriter -y -g
 ```
 
 Install all at once:
@@ -29,7 +30,8 @@ npx skills add Ycode-bot/dy_skills@framework-page-standardizer -y -g && \
 npx skills add Ycode-bot/dy_skills@incident-runbook-from-code -y -g && \
 npx skills add Ycode-bot/dy_skills@content-pipeline-migrator -y -g && \
 npx skills add Ycode-bot/dy_skills@multi-repo-sync-guard -y -g && \
-npx skills add Ycode-bot/dy_skills@activity-cms-psd -y -g
+npx skills add Ycode-bot/dy_skills@activity-cms-psd -y -g && \
+npx skills add Ycode-bot/dy_skills@workplace-viral-copywriter -y -g
 ```
 
 Verify installation:
@@ -46,6 +48,7 @@ ls ~/.agents/skills
 - `content-pipeline-migrator`: Scans Markdown/content pipelines and proposes batch migrations.
 - `multi-repo-sync-guard`: Detects cross-repo duplicated modules and generates sync checklists.
 - `activity-cms-psd`: Converts annotated activity PSDs into activityincms import JSON, sliced assets, theme notes, and UI/operator handoff docs.
+- `workplace-viral-copywriter`: Generates viral Chinese workplace copy for a capybara IP WeChat account, including topic judgment, titles, 5-6 paired two-line image groups, cover hooks, interaction questions, and hashtags.
 
 ## Skill Dependencies
 
