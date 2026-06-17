@@ -42,6 +42,8 @@ If the CLI environment is not installed, `./activity-cms-psd` runs `./install.sh
 ./install.sh
 ```
 
+`./activity-cms-psd` checks `Ycode-bot/dy_skills@activity-cms-psd` for updates on each run. When newer files are found, it updates the installed skill directory, preserves `.venv`, and restarts once. If the update check fails, continue with the local version. Set `ACTIVITY_CMS_PSD_AUTO_UPDATE=0` to skip this check.
+
 If `--out` is omitted, the script creates the default package directory. The default package folder must be shaped like:
 
 ```txt

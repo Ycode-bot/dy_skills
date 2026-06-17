@@ -32,6 +32,20 @@ Manual dependency install is still available:
 ./install.sh
 ```
 
+## Auto Update
+
+Every time `./activity-cms-psd` runs, it checks the GitHub source `Ycode-bot/dy_skills@activity-cms-psd`.
+
+If a newer Skill is available, it updates the local Skill files, keeps `.venv`, then restarts once and continues the original command.
+
+If the network is unavailable or GitHub cannot be reached, it prints a warning and continues with the local version.
+
+To skip the update check for one run:
+
+```bash
+ACTIVITY_CMS_PSD_AUTO_UPDATE=0 ./activity-cms-psd "/Users/you/Downloads/activity.psd" --out "/Users/you/Documents/activity-output"
+```
+
 ## Configure Image Compression
 
 Skill uses Tinify to compress exported images in `assets/` by default.

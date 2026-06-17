@@ -61,6 +61,14 @@ cd skills/activity-cms-psd
 
 On first run, it creates a local `.venv` and installs `Pillow`, `psd-tools[composite]`, and `tinify`. Adobe Photoshop is not required.
 
+The `activity-cms-psd` CLI checks `Ycode-bot/dy_skills@activity-cms-psd` for updates each time it runs. If an update is available, it refreshes the installed skill files, preserves the local `.venv`, and restarts once. If the network is unavailable, it continues with the local version.
+
+Disable auto-update for a run:
+
+```bash
+ACTIVITY_CMS_PSD_AUTO_UPDATE=0 ./activity-cms-psd "/path/to/activity.psd" --out "/path/to/activity-output"
+```
+
 Asset compression runs by default with Tinify. Configure the API key before generating packages:
 
 ```bash

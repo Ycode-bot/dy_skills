@@ -4,6 +4,59 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${ACTIVITY_CMS_PSD_VENV:-"$SCRIPT_DIR/.venv"}"
 PYTHON_BIN="${ACTIVITY_CMS_PSD_PYTHON:-"$VENV_DIR/bin/python"}"
+SKILL_SOURCE="${ACTIVITY_CMS_PSD_SKILL_SOURCE:-Ycode-bot/dy_skills@activity-cms-psd}"
+
+find_update_python() {
+  if [[ -n "${ACTIVITY_CMS_PSD_UPDATE_PYTHON:-}" ]]; then
+    command -v "$ACTIVITY_CMS_PSD_UPDATE_PYTHON"
+    return
+  fi
+
+  for candidate in python3.14 python3.13 python3.12 python3.11 python3.10 python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      command -v "$candidate"
+      return
+    fi
+  done
+}
+
+self_update() {
+  if [[ "${ACTIVITY_CMS_PSD_AUTO_UPDATE:-1}" == "0" ]]; then
+    return
+  fi
+  if [[ "${ACTIVITY_CMS_PSD_SELF_UPDATED:-0}" == "1" ]]; then
+    return
+  fi
+  if [[ ! "$SKILL_SOURCE" =~ ^([^/]+)/([^@]+)@(.+)$ ]]; then
+    echo "activity-cms-psd auto-update skipped: unsupported source $SKILL_SOURCE." >&2
+    return
+  fi
+
+  local owner="${BASH_REMATCH[1]}"
+  local repo="${BASH_REMATCH[2]}"
+  local skill_name="${BASH_REMATCH[3]}"
+  local update_python
+  update_python="$(find_update_python || true)"
+  if [[ -z "$update_python" ]]; then
+    echo "activity-cms-psd auto-update skipped: python was not found." >&2
+    return
+  fi
+
+  echo "activity-cms-psd checking for updates from $SKILL_SOURCE..." >&2
+  set +e
+  "$update_python" "$SCRIPT_DIR/scripts/self_update.py" \
+    --repo "$owner/$repo" \
+    --path "skills/$skill_name" \
+    --dest "$SCRIPT_DIR"
+  local update_status=$?
+  set -e
+  if [[ "$update_status" == "2" ]]; then
+    echo "activity-cms-psd updated. Restarting with the latest version..." >&2
+    ACTIVITY_CMS_PSD_SELF_UPDATED=1 exec "$SCRIPT_DIR/activity-cms-psd" "$@"
+  elif [[ "$update_status" != "0" ]]; then
+    echo "activity-cms-psd auto-update failed or was unavailable; continuing with local version." >&2
+  fi
+}
 
 dependencies_ok() {
   [[ -x "$PYTHON_BIN" ]] || return 1
@@ -13,6 +66,8 @@ import psd_tools
 import tinify
 PY
 }
+
+self_update "$@"
 
 bootstrap() {
   echo "activity-cms-psd dependencies are not ready. Running install.sh..." >&2
