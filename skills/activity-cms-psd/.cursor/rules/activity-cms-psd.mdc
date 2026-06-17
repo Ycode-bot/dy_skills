@@ -1,0 +1,37 @@
+---
+description: Convert annotated activity PSDs into activityincms assets, theme files, and CMS JSON.
+globs:
+  - "**/*.psd"
+alwaysApply: false
+---
+
+# Activity CMS PSD
+
+When asked to process an activity PSD for activityincms, use the CLI in this folder instead of hand-writing output files.
+
+## Command
+
+```bash
+./activity-cms-psd "/path/to/activity.psd" --out "/path/to/activity-output"
+```
+
+On first run, the CLI creates a local `.venv` and installs `Pillow`, `psd-tools[composite]`, and `tinify`.
+
+Tinify compression runs by default when `ACTIVITY_CMS_PSD_TINIFY_KEY` or `TINIFY_API_KEY` is configured. Use `--no-compress` to skip compression.
+
+Default output:
+
+```txt
+assets/
+cms-page-config.json
+theme.json
+theme.md
+```
+
+## Rules
+
+- `切图:<name>` exports PNG assets.
+- `组件:<中文组件名>` generates real activityincms components.
+- Use `--debug` only for troubleshooting.
+- Do not require Adobe Photoshop.
+- Do not infer or invent business IDs; leave them blank for operations.

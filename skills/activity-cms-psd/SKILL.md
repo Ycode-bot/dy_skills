@@ -33,7 +33,13 @@ If the user says `输出到 <path>` or otherwise gives an output path, treat tha
 When available, run:
 
 ```bash
-scripts/create_package.py <psd> --out <output-dir>
+./activity-cms-psd <psd> --out <output-dir>
+```
+
+If the CLI environment is not installed, `./activity-cms-psd` runs `./install.sh` automatically on first use. You can also install manually:
+
+```bash
+./install.sh
 ```
 
 If `--out` is omitted, the script creates the default package directory. The default package folder must be shaped like:
@@ -45,6 +51,8 @@ If `--out` is omitted, the script creates the default package directory. The def
   theme.json
   theme.md
 ```
+
+Assets in `assets/` are compressed by Tinify by default when `ACTIVITY_CMS_PSD_TINIFY_KEY` or `TINIFY_API_KEY` is configured. If no key is configured, package generation continues and `theme.md` records that compression was skipped. Use `--no-compress` to disable compression intentionally.
 
 When invoked with `--debug`, the package may additionally include:
 
@@ -165,7 +173,8 @@ If the skill is not automatically discovered in a conversation, use the explicit
    - composite preview
    - readable text layers or extracted XMP text
    - whether width is 750 or a 2x 1500 design
-   - Run `scripts/create_package.py <psd> --out <output>` from this skill folder to create the package directory, assets, theme files, and `cms-page-config.json`.
+   - Run `./activity-cms-psd <psd> --out <output>` from this skill folder to create the package directory, assets, theme files, and `cms-page-config.json`.
+   - Configure Tinify before running if image compression is required: `export ACTIVITY_CMS_PSD_TINIFY_KEY="..."`.
    - Use `--debug` only when you need `inspect/` reports, fallback slices, import notes, or local preview JSON.
    - The default command uses `--engine psd-tools`. Use `--engine composite` only for debugging fallback slicing.
 2. Identify page modules from top to bottom:

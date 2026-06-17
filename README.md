@@ -52,13 +52,41 @@ ls ~/.agents/skills
 
 ## Skill Dependencies
 
-`activity-cms-psd` requires Python and PSD parsing dependencies:
+`activity-cms-psd` uses Python PSD parsing dependencies. The CLI installs them automatically on first run:
 
 ```bash
-python3 -m pip install -r skills/activity-cms-psd/requirements.txt
+cd skills/activity-cms-psd
+./activity-cms-psd "/path/to/activity.psd" --out "/path/to/activity-output"
 ```
 
-It uses `Pillow` and `psd-tools[composite]`. Adobe Photoshop is not required.
+On first run, it creates a local `.venv` and installs `Pillow`, `psd-tools[composite]`, and `tinify`. Adobe Photoshop is not required.
+
+Asset compression runs by default with Tinify. Configure the API key before generating packages:
+
+```bash
+export ACTIVITY_CMS_PSD_TINIFY_KEY="your-tinify-api-key"
+```
+
+Use `--no-compress` when you need to skip compression or avoid consuming Tinify quota:
+
+```bash
+./activity-cms-psd "/path/to/activity.psd" --out "/path/to/activity-output" --no-compress
+```
+
+You can also install dependencies manually:
+
+```bash
+./install.sh
+```
+
+Default output:
+
+```txt
+assets/
+cms-page-config.json
+theme.json
+theme.md
+```
 
 ## Skill Contract
 

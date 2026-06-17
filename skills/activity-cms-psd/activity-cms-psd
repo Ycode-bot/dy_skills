@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="${ACTIVITY_CMS_PSD_VENV:-"$SCRIPT_DIR/.venv"}"
+PYTHON_BIN="${ACTIVITY_CMS_PSD_PYTHON:-"$VENV_DIR/bin/python"}"
+
+dependencies_ok() {
+  [[ -x "$PYTHON_BIN" ]] || return 1
+"$PYTHON_BIN" - <<'PY' >/dev/null 2>&1
+from PIL import Image
+import psd_tools
+import tinify
+PY
+}
+
+bootstrap() {
+  echo "activity-cms-psd dependencies are not ready. Running install.sh..." >&2
+  ACTIVITY_CMS_PSD_VENV="$VENV_DIR" "$SCRIPT_DIR/install.sh"
+  PYTHON_BIN="${ACTIVITY_CMS_PSD_PYTHON:-"$VENV_DIR/bin/python"}"
+}
+
+if ! dependencies_ok; then
+  if [[ -n "${ACTIVITY_CMS_PSD_PYTHON:-}" ]]; then
+    cat >&2 <<EOF
+ACTIVITY_CMS_PSD_PYTHON is set but does not have required dependencies:
+  $ACTIVITY_CMS_PSD_PYTHON
+
+Install these packages in that Python environment:
+  Pillow
+  psd-tools[composite]
+  tinify
+
+Or unset ACTIVITY_CMS_PSD_PYTHON and let this CLI create its local .venv.
+EOF
+    exit 1
+  fi
+  bootstrap
+fi
+
+if ! dependencies_ok; then
+  cat >&2 <<EOF
+activity-cms-psd dependency installation failed.
+
+Please run manually:
+  cd "$SCRIPT_DIR"
+  ./install.sh
+EOF
+  exit 1
+fi
+
+exec "$PYTHON_BIN" "$SCRIPT_DIR/scripts/create_package.py" "$@"

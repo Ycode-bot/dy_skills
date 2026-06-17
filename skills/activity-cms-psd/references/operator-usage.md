@@ -4,18 +4,53 @@
 
 ## Install Dependencies
 
-The Skill uses Python and PSD parsing libraries.
+The tool uses Python and PSD parsing libraries. The CLI installs Python packages automatically on first run.
+
+From `skills/activity-cms-psd`, run:
 
 ```bash
-python3 -m pip install -r skills/activity-cms-psd/requirements.txt
+./activity-cms-psd "/Users/you/Downloads/activity.psd" --out "/Users/you/Documents/activity-output"
 ```
 
-Required Python packages:
+On first run, it creates a local `.venv` and installs:
 
 - `Pillow`
 - `psd-tools[composite]`
+- `tinify`
 
 Adobe Photoshop is not required.
+
+If Python 3.10+ is not available, install it first. On macOS with Homebrew:
+
+```bash
+brew install python
+```
+
+Manual dependency install is still available:
+
+```bash
+./install.sh
+```
+
+## Configure Image Compression
+
+Skill uses Tinify to compress exported images in `assets/` by default.
+
+Before generating a package, configure the API key:
+
+```bash
+export ACTIVITY_CMS_PSD_TINIFY_KEY="your-tinify-api-key"
+```
+
+`TINIFY_API_KEY` is also supported as a fallback environment variable.
+
+If no key is configured, package generation still succeeds and `theme.md` says compression was skipped. To intentionally skip compression:
+
+```bash
+./activity-cms-psd "/Users/you/Downloads/activity.psd" --out "/Users/you/Documents/activity-output" --no-compress
+```
+
+Do not paste the Tinify key into PSD names, JSON files, or GitHub commits.
 
 ## Invoke The Skill
 
@@ -25,7 +60,13 @@ In Codex, use a direct request:
 使用 activity-cms-psd skill 处理 /Users/you/Downloads/activity.psd，输出到 /Users/you/Documents/activity-output
 ```
 
-Or:
+In Cursor, Claude Code, or a normal terminal, run from `skills/activity-cms-psd`:
+
+```bash
+./activity-cms-psd "/Users/you/Downloads/activity.psd" --out "/Users/you/Documents/activity-output"
+```
+
+Or ask the AI tool:
 
 ```txt
 把这个 PSD 生成 activityincms 可导入 JSON、素材包和主题包，输出到 /Users/you/Documents/activity-output
@@ -61,6 +102,7 @@ theme.md
 ```
 
 First check `cms-page-config.json`, `assets/`, `theme.json`, and `theme.md`.
+`theme.md` includes the Tinify compression summary: compressed count, failed count, skipped count, and saved file size.
 
 Developer debug mode may additionally create `inspect/`, `import-notes.md`, and `cms-page-config.local-preview.json`. These are not default operator deliverables.
 

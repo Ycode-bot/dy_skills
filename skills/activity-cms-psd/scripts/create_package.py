@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import os
 import re
 import subprocess
 import sys
@@ -14,6 +15,8 @@ from datetime import datetime
 from pathlib import Path
 
 from PIL import Image, ImageStat, UnidentifiedImageError
+
+COMPRESSIBLE_ASSET_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 
 ASSET_RULES = {
     "hero": {
@@ -180,6 +183,126 @@ def write_json(path: Path, data: dict) -> None:
 
 def read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def tinify_api_key() -> str:
+    return os.environ.get("ACTIVITY_CMS_PSD_TINIFY_KEY") or os.environ.get("TINIFY_API_KEY") or ""
+
+
+def file_size(path: Path) -> int:
+    return path.stat().st_size if path.exists() else 0
+
+
+def compress_assets_with_tinify(assets_dir: Path, enabled: bool = True) -> dict:
+    image_paths = sorted(
+        path for path in assets_dir.iterdir()
+        if path.is_file() and path.suffix.lower() in COMPRESSIBLE_ASSET_SUFFIXES
+    )
+    skipped_items = []
+    original_total = 0
+    for path in image_paths:
+        original = file_size(path)
+        original_total += original
+        skipped_items.append({
+            "file": f"assets/{path.name}",
+            "status": "skipped",
+            "originalBytes": original,
+            "compressedBytes": original,
+            "savedBytes": 0,
+            "savedPercent": 0,
+        })
+
+    summary = {
+        "enabled": enabled,
+        "status": "disabled" if not enabled else "pending",
+        "provider": "tinify",
+        "assetCount": len(image_paths),
+        "successCount": 0,
+        "failedCount": 0,
+        "skippedCount": 0,
+        "originalBytes": original_total,
+        "compressedBytes": original_total,
+        "savedBytes": 0,
+        "savedPercent": 0,
+        "items": [],
+    }
+
+    if not enabled:
+        summary["skippedCount"] = len(image_paths)
+        summary["items"] = skipped_items
+        return summary
+
+    api_key = tinify_api_key()
+    if not api_key:
+        summary["status"] = "skipped"
+        summary["reason"] = "missing Tinify API key; set ACTIVITY_CMS_PSD_TINIFY_KEY or TINIFY_API_KEY"
+        summary["skippedCount"] = len(image_paths)
+        summary["items"] = [
+            {**item, "reason": summary["reason"]}
+            for item in skipped_items
+        ]
+        return summary
+
+    try:
+        import tinify
+    except ImportError as exc:
+        summary["status"] = "skipped"
+        summary["reason"] = f"tinify package is not installed: {exc}"
+        summary["skippedCount"] = len(image_paths)
+        summary["items"] = [
+            {**item, "reason": summary["reason"]}
+            for item in skipped_items
+        ]
+        return summary
+
+    tinify.key = api_key
+    summary["originalBytes"] = 0
+    summary["compressedBytes"] = 0
+    for path in image_paths:
+        original = file_size(path)
+        item = {
+            "file": f"assets/{path.name}",
+            "status": "pending",
+            "originalBytes": original,
+            "compressedBytes": original,
+            "savedBytes": 0,
+            "savedPercent": 0,
+        }
+        summary["originalBytes"] += original
+        try:
+            tinify.from_file(str(path)).to_file(str(path))
+            compressed = file_size(path)
+            saved = max(0, original - compressed)
+            item.update({
+                "status": "compressed",
+                "compressedBytes": compressed,
+                "savedBytes": saved,
+                "savedPercent": round(saved / original * 100, 2) if original else 0,
+            })
+            summary["successCount"] += 1
+            summary["compressedBytes"] += compressed
+        except Exception as exc:  # Tinify raises several provider-specific errors.
+            item.update({
+                "status": "failed",
+                "error": str(exc),
+            })
+            summary["failedCount"] += 1
+            summary["compressedBytes"] += original
+        summary["items"].append(item)
+
+    summary["savedBytes"] = max(0, summary["originalBytes"] - summary["compressedBytes"])
+    summary["savedPercent"] = (
+        round(summary["savedBytes"] / summary["originalBytes"] * 100, 2)
+        if summary["originalBytes"]
+        else 0
+    )
+    if summary["failedCount"] and summary["successCount"]:
+        summary["status"] = "partial"
+    elif summary["failedCount"]:
+        summary["status"] = "failed"
+    else:
+        summary["status"] = "ok"
+    return summary
 
 
 def bbox_to_dict(bbox) -> dict:
@@ -1491,6 +1614,11 @@ def main() -> None:
         action="store_true",
         help="Write inspect reports, fallback slices, import notes, and local-preview JSON for developer debugging.",
     )
+    parser.add_argument(
+        "--no-compress",
+        action="store_true",
+        help="Disable default Tinify compression for assets.",
+    )
     args = parser.parse_args()
 
     psd_path = Path(args.psd).expanduser().resolve()
@@ -1596,6 +1724,15 @@ def main() -> None:
             "mergeReason": item["mergeReason"],
             "fileSizeBytes": item["fileSizeBytes"],
         }
+
+    compression = compress_assets_with_tinify(assets_dir, enabled=not args.no_compress)
+    export_report["compression"] = compression
+    if compression.get("items"):
+        compressed_by_file = {item["file"]: item for item in compression["items"]}
+        for asset_info in export_report.get("assets", {}).values():
+            compressed_item = compressed_by_file.get(asset_info.get("file"))
+            if compressed_item:
+                asset_info["compression"] = compressed_item
 
     write_json(inspect_dir / "component-detection.json", {
         "source": str(psd_path),
@@ -1712,6 +1849,21 @@ def main() -> None:
         "- See `theme.json` for the full extracted palette.\n",
         encoding="utf-8",
     )
+    compression_lines = [
+        "\n## Image Compression\n\n",
+        f"- Provider: `{compression.get('provider')}`\n",
+        f"- Status: `{compression.get('status')}`\n",
+        f"- Assets: `{compression.get('assetCount')}` total, `{compression.get('successCount')}` compressed, `{compression.get('failedCount')}` failed, `{compression.get('skippedCount')}` skipped\n",
+        f"- Original size: `{compression.get('originalBytes')}` bytes\n",
+        f"- Final size: `{compression.get('compressedBytes')}` bytes\n",
+        f"- Saved: `{compression.get('savedBytes')}` bytes (`{compression.get('savedPercent')}`%)\n",
+    ]
+    if compression.get("reason"):
+        compression_lines.append(f"- Note: {compression['reason']}\n")
+    if compression.get("failedCount"):
+        compression_lines.append("- Some assets failed to compress; original files were kept.\n")
+    with (package_dir / "theme.md").open("a", encoding="utf-8") as theme_md:
+        theme_md.writelines(compression_lines)
 
     asset_notes = []
     for item in slices:
@@ -1785,6 +1937,7 @@ def main() -> None:
             "- Import JSON: `cms-page-config.json`\n"
             "- Local `asset://` references are placeholders. Upload files from `assets/` and replace them with CDN URLs before save/preview.\n"
             "- Default asset export uses Python `psd-tools`; Photoshop is not required on the operator machine.\n"
+            "- Tinify compression runs by default for `assets/`; use `--no-compress` to disable it.\n"
             "- If a named layer/group cannot be exported reliably, the asset falls back to composite-image slicing.\n"
             "- Each PSD module is imported once. `组件:` annotations generate real CMS components; `切图:` annotations generate replacement assets.\n"
             "- `cms-page-config.local-preview.json` is a debug-only local URL variant.\n"
@@ -1818,6 +1971,11 @@ def main() -> None:
         "themeMd": str(package_dir / "theme.md"),
         "engine": args.engine,
         "debug": debug_enabled,
+        "compression": {
+            key: value
+            for key, value in compression.items()
+            if key != "items"
+        },
     }
     if debug_enabled:
         result.update({
