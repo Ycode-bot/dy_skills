@@ -14,6 +14,7 @@ The recommended input is a lightly annotated PSD that follows `references/psd-an
 For new PSDs, prefer the simplified Chinese annotations:
 
 - `切图:<assetName>` or `切图:<assetName>[widthxheight]` for required PNG exports.
+- `切图:<assetName>(requirements)` when the CMS image field has extra size, layout, or visibility notes.
 - `组件:<Chinese component label>` for real CMS component generation.
 
 Cut annotations and component annotations are independent but complementary. `组件:` drives the JSON component tree. `切图:` drives the asset package that operators use to replace the generated component's image fields.
@@ -35,6 +36,17 @@ When available, run:
 ```bash
 ./activity-cms-psd <psd> --out <output-dir>
 ```
+
+Do not use `--debug` by default. Default operator packages should be clean and include only:
+
+```txt
+assets/
+cms-page-config.json
+theme.json
+theme.md
+```
+
+Fallback preview slices such as `full-page.png`, `hero.png`, `intro-rules.png`, `draw-section.png`, and `pool-section.png` are debug artifacts only. Generate them only when the user explicitly asks for debug reports, fallback slice inspection, layer/component detection details, or local preview JSON.
 
 If the CLI environment is not installed, `./activity-cms-psd` runs `./install.sh` automatically on first use. You can also install manually:
 
@@ -70,7 +82,7 @@ cms-page-config.local-preview.json
 import-notes.md
 ```
 
-`cms-page-config.json` must use the activityincms whole-page import format:
+`cms-page-config.json` must use the activityincms whole-page import format. In normal mode, `assets` should contain only real exported assets such as `切图:` assets and component field assets. Debug-only fallback assets may appear only when `--debug` is used:
 
 ```json
 {
@@ -82,11 +94,8 @@ import-notes.md
     "cmsWidth": 750
   },
   "assets": {
-    "fullPage": "assets/full-page.png",
     "hero": "assets/hero.png",
-    "introRules": "assets/intro-rules.png",
-    "drawSection": "assets/draw-section.png",
-    "poolSection": "assets/pool-section.png"
+    "mainButton": "assets/main-button.png"
   },
   "components": []
 }
@@ -106,6 +115,8 @@ Default asset export uses Python `psd-tools`, not Adobe Photoshop. It must read 
 
 - `切图:<assetName>` exports the layer/group as a PNG using its actual bounds.
 - `切图:<assetName>[<width>x<height>]` exports the layer/group as a PNG with an optional target-size check.
+- `切图:<assetName>(<requirements>)` exports with `<assetName>` as the stable file name and records the parenthesized requirements in JSON/debug metadata. Recognized requirements include `宽度688`, `高度166`, `739*496`, `739x496`, `上方留出部分空白`, and `清空不显示`.
+- When both width and height are present, resize the exported PNG to that exact size. When only one dimension is present, resize that dimension and keep the other dimension at the PSD layer/group's original size. Non-size requirements are handoff notes only; do not auto-crop, add transparent padding, hide content, or modify pixels for notes such as `留白` or `清空不显示`.
 - `组件:<Chinese label>` generates a real CMS component with sparse config overrides and blank business IDs.
 - `cms:<componentName>#<localName>` creates or candidates a CMS component.
 - `asset:<fieldName>` marks an exportable image asset.

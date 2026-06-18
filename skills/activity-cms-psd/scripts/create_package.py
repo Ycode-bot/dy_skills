@@ -438,22 +438,84 @@ def parse_cms_annotation(name: str) -> tuple[str | None, str | None]:
     return match.group(1), match.group(2) or match.group(1)
 
 
+def split_trailing_requirement(value: str) -> tuple[str, str]:
+    value = (value or "").strip()
+    pairs = {
+        "]": "[",
+        "］": "［",
+        ")": "(",
+        "）": "（",
+    }
+    if not value or value[-1] not in pairs:
+        return value, ""
+
+    close_char = value[-1]
+    open_char = pairs[close_char]
+    depth = 0
+    for index in range(len(value) - 1, -1, -1):
+        char = value[index]
+        if char == close_char:
+            depth += 1
+        elif char == open_char:
+            depth -= 1
+            if depth == 0:
+                local_name = value[:index].strip()
+                requirement = value[index + 1:-1].strip()
+                return local_name or value, requirement
+    return value, ""
+
+
+def parse_cut_requirement(requirement: str) -> dict:
+    raw_requirement = (requirement or "").strip()
+    target_width = None
+    target_height = None
+    if raw_requirement:
+        compact_size = re.search(r"(?<!\d)(\d{2,5})\s*[xX×*]\s*(\d{2,5})(?!\d)", raw_requirement)
+        if compact_size:
+            target_width = int(compact_size.group(1))
+            target_height = int(compact_size.group(2))
+        else:
+            width_match = re.search(r"(?:宽度|宽|width|w)\s*[:：=]?\s*(\d{2,5})", raw_requirement, re.I)
+            height_match = re.search(r"(?:高度|高|height|h)\s*[:：=]?\s*(\d{2,5})", raw_requirement, re.I)
+            if width_match:
+                target_width = int(width_match.group(1))
+            if height_match:
+                target_height = int(height_match.group(1))
+
+    fragments = [
+        item.strip()
+        for item in re.split(r"[,，;；、\n\r]+", raw_requirement)
+        if item.strip()
+    ]
+    layout_keywords = ("留白", "留出", "空白", "顶部", "上方", "下方", "左侧", "右侧", "距离", "间距")
+    visibility_keywords = ("清空", "不显示", "透明", "隐藏")
+    layout_notes = [item for item in fragments if any(keyword in item for keyword in layout_keywords)]
+    visibility_notes = [item for item in fragments if any(keyword in item for keyword in visibility_keywords)]
+
+    return {
+        "rawRequirement": raw_requirement,
+        "targetWidth": target_width,
+        "targetHeight": target_height,
+        "layoutNotes": layout_notes,
+        "visibilityNotes": visibility_notes,
+    }
+
+
 def parse_cut_annotation(name: str) -> dict | None:
     match = re.search(
-        r"(?:切图|cut)\s*[:：]\s*([^\[\]［］\n\r]+?)\s*(?:[\[［]\s*(\d+)\s*[xX×*]\s*(\d+)\s*[\]］])?\s*$",
+        r"(?:切图|cut)\s*[:：]\s*(.+?)\s*$",
         name or "",
         re.I,
     )
     if not match:
         return None
 
-    local_name = match.group(1).strip()
-    width = int(match.group(2)) if match.group(2) else None
-    height = int(match.group(3)) if match.group(3) else None
+    local_name, requirement = split_trailing_requirement(match.group(1))
+    local_name = local_name.strip()
+    parsed_requirement = parse_cut_requirement(requirement)
     return {
         "localName": local_name,
-        "targetWidth": width,
-        "targetHeight": height,
+        **parsed_requirement,
     }
 
 
@@ -567,16 +629,16 @@ def export_cut_asset(layer, record: dict, cut_info: dict, report: dict, assets_d
     size_status = "default-size"
     size_warning = ""
 
-    if target_width and target_height:
-        original_ratio = original_width / original_height if original_height else 0
-        target_ratio = target_width / target_height
-        if original_ratio and abs(original_ratio - target_ratio) / target_ratio <= 0.01:
-            image = image.resize((target_width, target_height), Image.LANCZOS)
-            resized = (original_width, original_height) != (target_width, target_height)
-            size_status = "resized" if resized else "matched"
-        else:
-            size_status = "size-mismatch"
-            size_warning = "目标尺寸与图层比例不一致，已按原始尺寸导出，未自动裁切或拉伸"
+    if target_width or target_height:
+        export_width = target_width or original_width
+        export_height = target_height or original_height
+        image = image.resize((export_width, export_height), Image.LANCZOS)
+        resized = (original_width, original_height) != (export_width, export_height)
+        size_status = "resized" if resized else "matched"
+
+    notes = cut_info.get("layoutNotes", []) + cut_info.get("visibilityNotes", [])
+    if notes:
+        size_warning = "；".join(f"已记录要求「{note}」，未自动修改图片内容" for note in notes)
 
     asset_name = unique_asset_name(report["assets"], cut_info["localName"])
     output_path = assets_dir / f"{asset_name}.png"
@@ -590,6 +652,9 @@ def export_cut_asset(layer, record: dict, cut_info: dict, report: dict, assets_d
         "bounds": record["bbox"],
         "confidence": 1.0,
         "cutName": cut_info["localName"],
+        "rawRequirement": cut_info.get("rawRequirement", ""),
+        "layoutNotes": cut_info.get("layoutNotes", []),
+        "visibilityNotes": cut_info.get("visibilityNotes", []),
         "targetWidth": target_width,
         "targetHeight": target_height,
         "originalWidth": original_width,
@@ -783,6 +848,9 @@ def export_layer_assets(
                 "layerPath": record["path"],
                 "bounds": record["bbox"],
                 "cutName": cut_info["localName"],
+                "rawRequirement": cut_info.get("rawRequirement", ""),
+                "layoutNotes": cut_info.get("layoutNotes", []),
+                "visibilityNotes": cut_info.get("visibilityNotes", []),
                 "targetWidth": cut_info.get("targetWidth"),
                 "targetHeight": cut_info.get("targetHeight"),
                 "status": "failed",
@@ -1391,6 +1459,18 @@ def build_cut_asset_preview_components(cut_assets: list[dict]) -> list[dict]:
             continue
         asset_ref = item["assetRef"]
         asset_file = item.get("file", asset_ref)
+        todos = [
+            f"上传 {asset_file} 并替换 {asset_ref} 为 CDN URL",
+            "该组件来自 PSD `切图:` 标注，用于运营视觉验收和素材替换"
+        ]
+        if item.get("rawRequirement"):
+            todos.append(f"切图要求：{item['rawRequirement']}")
+        for note in item.get("layoutNotes", []):
+            todos.append(f"确认版式要求：{note}")
+        for note in item.get("visibilityNotes", []):
+            todos.append(f"确认显示要求：{note}")
+        if item.get("sizeWarning"):
+            todos.append(item["sizeWarning"])
         components.append({
             "componentName": "piccomponent",
             "config": {
@@ -1401,11 +1481,17 @@ def build_cut_asset_preview_components(cut_assets: list[dict]) -> list[dict]:
                 "sourceLayer": item.get("layerPath"),
                 "sourceType": item.get("sourceType", "cut-annotation"),
                 "cutName": item.get("cutName") or item.get("assetName"),
+                "rawRequirement": item.get("rawRequirement", ""),
+                "layoutNotes": item.get("layoutNotes", []),
+                "visibilityNotes": item.get("visibilityNotes", []),
+                "targetWidth": item.get("targetWidth"),
+                "targetHeight": item.get("targetHeight"),
+                "exportedWidth": item.get("exportedWidth"),
+                "exportedHeight": item.get("exportedHeight"),
+                "sizeStatus": item.get("sizeStatus"),
+                "sizeWarning": item.get("sizeWarning", ""),
                 "generationMode": "cut-asset-preview",
-                "todos": [
-                    f"上传 {asset_file} 并替换 {asset_ref} 为 CDN URL",
-                    "该组件来自 PSD `切图:` 标注，用于运营视觉验收和素材替换"
-                ],
+                "todos": todos,
             }
         })
     return components
@@ -1890,11 +1976,18 @@ def main() -> None:
         target = (
             f"{item.get('targetWidth')}x{item.get('targetHeight')}"
             if item.get("targetWidth") and item.get("targetHeight")
+            else f"宽度{item.get('targetWidth')}"
+            if item.get("targetWidth")
+            else f"高度{item.get('targetHeight')}"
+            if item.get("targetHeight")
             else "默认实际尺寸"
         )
+        requirement = f"，要求：{item.get('rawRequirement')}" if item.get("rawRequirement") else ""
+        notes = item.get("layoutNotes", []) + item.get("visibilityNotes", [])
+        note_text = f"，备注：{'；'.join(notes)}" if notes else ""
         warning = f"，提示：{item.get('sizeWarning')}" if item.get("sizeWarning") else ""
         asset_notes.append(
-            f"- `{item.get('file')}`: `切图:{item.get('cutName')}`，目标 `{target}`，导出 `{item.get('exportedWidth')}x{item.get('exportedHeight')}`，状态 `{item.get('sizeStatus')}`，图层 `{item.get('layerPath')}`{warning}"
+            f"- `{item.get('file')}`: `切图:{item.get('cutName')}`，目标 `{target}`，导出 `{item.get('exportedWidth')}x{item.get('exportedHeight')}`，状态 `{item.get('sizeStatus')}`，图层 `{item.get('layerPath')}`{requirement}{note_text}{warning}"
         )
 
     candidate_notes = []
