@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cloudflare Auto Deployer"
+  short_description: "Detect and deploy Cloudflare Pages or Workers"
+  default_prompt: "Use $cloudflare-auto-deployer to inspect this project, detect whether it targets Cloudflare Pages or Workers, verify the required credentials, and prepare or run the safest deployment command."

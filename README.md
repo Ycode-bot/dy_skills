@@ -21,6 +21,7 @@ npx skills add Ycode-bot/dy_skills@multi-repo-sync-guard -y -g
 npx skills add Ycode-bot/dy_skills@activity-cms-psd -y -g
 npx skills add Ycode-bot/dy_skills@workplace-viral-copywriter -y -g
 npx skills add Ycode-bot/dy_skills@tinify-image-compressor -y -g
+npx skills add Ycode-bot/dy_skills@cloudflare-auto-deployer -y -g
 ```
 
 Install all at once:
@@ -33,7 +34,8 @@ npx skills add Ycode-bot/dy_skills@content-pipeline-migrator -y -g && \
 npx skills add Ycode-bot/dy_skills@multi-repo-sync-guard -y -g && \
 npx skills add Ycode-bot/dy_skills@activity-cms-psd -y -g && \
 npx skills add Ycode-bot/dy_skills@workplace-viral-copywriter -y -g && \
-npx skills add Ycode-bot/dy_skills@tinify-image-compressor -y -g
+npx skills add Ycode-bot/dy_skills@tinify-image-compressor -y -g && \
+npx skills add Ycode-bot/dy_skills@cloudflare-auto-deployer -y -g
 ```
 
 Verify installation:
@@ -52,6 +54,7 @@ ls ~/.agents/skills
 - `activity-cms-psd`: Converts annotated activity PSDs into activityincms import JSON, sliced assets, theme notes, and UI/operator handoff docs.
 - `workplace-viral-copywriter`: Generates viral Chinese workplace copy for a capybara IP WeChat account, including topic judgment, titles, 5-6 paired two-line image groups, cover hooks, interaction questions, and hashtags.
 - `tinify-image-compressor`: Compresses, resizes, converts, and metadata-preserves local image batches with Tinify's Node.js API while keeping originals untouched by default.
+- `cloudflare-auto-deployer`: Detects whether a repo targets Cloudflare Pages or Workers, verifies credentials, prints safe Wrangler deployment plans, and can generate GitHub Actions workflows.
 
 ## Skill Dependencies
 
@@ -92,6 +95,18 @@ npm install
 export TINIFY_API_KEY="your-tinify-api-key"
 node scripts/compress-images.mjs ./input-images --out ./optimized-images --dry-run
 node scripts/compress-images.mjs ./input-images --out ./optimized-images --convert webp --resize fit:1600x1600
+```
+
+`cloudflare-auto-deployer` includes a Node.js helper for Cloudflare Pages and Workers deployment planning. Install dependencies once, export Cloudflare credentials, then inspect or deploy a project:
+
+```bash
+cd skills/cloudflare-auto-deployer
+npm install
+export CLOUDFLARE_API_TOKEN="cfut_..."
+export CLOUDFLARE_ACCOUNT_ID="your-account-id"
+node scripts/cloudflare-deploy.mjs detect /path/to/project
+node scripts/cloudflare-deploy.mjs deploy /path/to/project
+node scripts/cloudflare-deploy.mjs github-action /path/to/project
 ```
 
 You can also install dependencies manually:
