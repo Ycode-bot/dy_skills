@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tinify Image Compressor"
+  short_description: "Compress, resize, and convert images with Tinify"
+  default_prompt: "Use $tinify-image-compressor to compress these local images into an output directory, preserving folder structure and applying only the resize, format, and metadata options I request."

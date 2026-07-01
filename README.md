@@ -20,6 +20,7 @@ npx skills add Ycode-bot/dy_skills@content-pipeline-migrator -y -g
 npx skills add Ycode-bot/dy_skills@multi-repo-sync-guard -y -g
 npx skills add Ycode-bot/dy_skills@activity-cms-psd -y -g
 npx skills add Ycode-bot/dy_skills@workplace-viral-copywriter -y -g
+npx skills add Ycode-bot/dy_skills@tinify-image-compressor -y -g
 ```
 
 Install all at once:
@@ -31,7 +32,8 @@ npx skills add Ycode-bot/dy_skills@incident-runbook-from-code -y -g && \
 npx skills add Ycode-bot/dy_skills@content-pipeline-migrator -y -g && \
 npx skills add Ycode-bot/dy_skills@multi-repo-sync-guard -y -g && \
 npx skills add Ycode-bot/dy_skills@activity-cms-psd -y -g && \
-npx skills add Ycode-bot/dy_skills@workplace-viral-copywriter -y -g
+npx skills add Ycode-bot/dy_skills@workplace-viral-copywriter -y -g && \
+npx skills add Ycode-bot/dy_skills@tinify-image-compressor -y -g
 ```
 
 Verify installation:
@@ -49,6 +51,7 @@ ls ~/.agents/skills
 - `multi-repo-sync-guard`: Detects cross-repo duplicated modules and generates sync checklists.
 - `activity-cms-psd`: Converts annotated activity PSDs into activityincms import JSON, sliced assets, theme notes, and UI/operator handoff docs.
 - `workplace-viral-copywriter`: Generates viral Chinese workplace copy for a capybara IP WeChat account, including topic judgment, titles, 5-6 paired two-line image groups, cover hooks, interaction questions, and hashtags.
+- `tinify-image-compressor`: Compresses, resizes, converts, and metadata-preserves local image batches with Tinify's Node.js API while keeping originals untouched by default.
 
 ## Skill Dependencies
 
@@ -79,6 +82,16 @@ Use `--no-compress` when you need to skip compression or avoid consuming Tinify 
 
 ```bash
 ./activity-cms-psd "/path/to/activity.psd" --out "/path/to/activity-output" --no-compress
+```
+
+`tinify-image-compressor` includes a Node.js helper for batch image optimization. Install dependencies once, export a Tinify API key, then run the helper against a file or directory:
+
+```bash
+cd skills/tinify-image-compressor
+npm install
+export TINIFY_API_KEY="your-tinify-api-key"
+node scripts/compress-images.mjs ./input-images --out ./optimized-images --dry-run
+node scripts/compress-images.mjs ./input-images --out ./optimized-images --convert webp --resize fit:1600x1600
 ```
 
 You can also install dependencies manually:

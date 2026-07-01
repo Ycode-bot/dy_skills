@@ -1,0 +1,13 @@
+{
+  "name": "tinify-image-compressor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check scripts/compress-images.mjs",
+    "help": "node scripts/compress-images.mjs --help"
+  },
+  "dependencies": {
+    "tinify": "^1.8.2"
+  }
+}
