@@ -5,7 +5,7 @@ description: Generate viral, platform-safe Chinese workplace copy for a capybara
 
 # Workplace Viral Copywriter
 
-This skill writes viral Chinese workplace copy for the user's capybara IP account. It researches current workplace resonance points first, then generates original text; use `ip-comic-prompt-writer` later to convert approved lines into image-generation prompts.
+This skill writes viral Chinese workplace copy for the user's capybara IP account. It researches current resonance points first, then generates original text; use `ip-comic-prompt-writer` later to convert approved lines into image-generation prompts.
 
 ## Core Positioning
 
@@ -22,6 +22,29 @@ Default reader:
 - 想转发给朋友或同事，但不想显得攻击性太强
 - 喜欢短句、金句、冷幽默、自我安慰式清醒
 
+## Topic Selection Model
+
+Default topic model:
+- Write one article around one concrete scene, not one abstract mood word
+- Prefer a normal person in a specific situation over a fixed "unlucky persona"
+- Prefer a visible contradiction that can be expanded into 6-10 observations
+- The article should read like continuous observation panels, not stacked viewpoint slogans
+
+The best topics usually satisfy all three:
+- `具体场景`: readers can instantly picture where the person is and what they are doing
+- `明确矛盾`: the person wants A but keeps doing B, or the process and result do not match
+- `连续观察`: each panel can add one more recognizable detail without changing the theme
+
+Good topic shapes:
+- 行为打架型: 面试时什么都答应，回家又不想去了
+- 认知错位型: 不舍得花99，却愿意花10个9.9
+- 结果反差型: 累一天发现只赚了8块钱
+
+Weak topic shapes:
+- pure mood labels such as `好累`, `内耗`, `低电量`, `空降疲惫`
+- pure viewpoints such as `钱才顶饿`, `工作只是谋生`, `同事只是同事`
+- broad categories without a scene, such as `成年人状态`, `最近的我`, `今天上班`
+
 ## Output Contract
 
 Unless the user asks for a different format, output these sections in Chinese:
@@ -32,7 +55,8 @@ Unless the user asks for a different format, output these sections in Chinese:
    - Do not quote, paste, or near-copy online posts, titles, punchlines, competitor copy, character concepts, or layouts.
    - If search is unavailable, state that the research pass could not be completed and continue from the built-in motif bank.
 2. `选题判断`
-   - Identify the primary motif: 工资, 同事, 领导, 情绪止损, 荒诞对比, 关系降级, 背锅, 加班, 绩效, 秒回, 团建, 周报, or 消息焦虑.
+   - Identify the primary motif: 工资, 同事, 领导, 情绪止损, 荒诞对比, 关系降级, 背锅, 加班, 绩效, 秒回, 团建, 周报, 消息焦虑, or a life-adjacent daily-scene topic that still fits the account voice.
+   - State the concrete scene first, then the contradiction or mismatch inside it.
    - Explain the reader resonance in 1-2 short sentences.
    - Choose only one best-fit theme from the research, rather than mixing many hot topics into one article.
 3. `爆款标题`
@@ -41,8 +65,8 @@ Unless the user asks for a different format, output these sections in Chinese:
 4. `正文文案`
    - Write 10-12 lines organized as 5-6 paired image groups.
    - Use the exact group format: `第1组 上：...` and `第1组 下：...`.
-   - The upper line sets up a workplace scene, small feeling, or ordinary problem.
-   - The lower line gives the turn: relief, self-comfort, deadpan punchline, or gentle correction.
+   - The upper line sets up one specific scene moment, action, or recognizable problem inside the chosen topic.
+   - The lower line gives the turn: contradiction reveal, deadpan punchline, relief, self-comfort, or gentle correction.
    - Every line should be image-ready and able to become one capybara comic image, but each pair should feel connected.
    - Each line should be short enough for large cover-style text.
 5. `画面关键词`
@@ -80,6 +104,11 @@ Use adjacent motifs when the topic requires them:
 - 团建表演
 - 公司不是家
 - 上班人设
+- 面试心态
+- 发工资当天
+- 一天花钱流水账
+- 只想买一样结果买一堆
+- 想早睡结果一直不睡
 
 ## Anti-Fatigue Rules
 
@@ -87,6 +116,7 @@ Do not mechanically repeat a prior viral sentence or overuse one phrase.
 
 - Replicate the emotional structure, not the exact wording.
 - Use research to rotate surface scenes and complaint targets; do not let every article begin from salary or `这点工资不配`.
+- Rotate not only complaint targets, but also scene families: workplace, commute, shopping, eating, sleep, interviews, payday, rent, and social avoidance.
 - Each article must have one core complaint target: salary, instant replies, overtime, coworkers, leaders, blame, team building, weekly reports, message anxiety, performance review, or meetings.
 - The same series may run for at most 3 consecutive posts. The 4th post must change scene, target, or sentence pattern.
 - Avoid publishing multiple posts whose first lines all start with `这点工资不配...`.
@@ -101,21 +131,53 @@ Do not mechanically repeat a prior viral sentence or overuse one phrase.
 
 Default tone is 劝自己清醒: it should feel like the reader is comforting themselves after work, not shouting at the workplace.
 
+Write from observation before explanation:
+- Start from scene, action, object, or behavior.
+- Let readers infer the feeling from the scene whenever possible.
+- Do not begin from an abstract emotion label and then search for examples.
+- If a line sounds like a life summary, rewrite it into one visible moment.
+
+Write like a person reacting, not like a writer summarizing:
+- Prefer immediate human reactions over polished conclusions.
+- A good lower line should feel like something the person mutters right after the moment happened.
+- Keep some sentences a little blunt, a little small, or slightly unfinished if that makes them sound more human.
+- Do not chase perfect symmetry, perfect parallelism, or perfect "wrap-up" phrasing.
+- If a line sounds too neat, too smart, or too complete, make it plainer and more spoken.
+
+Priority sentence style:
+- `我一下就...`
+- `我当场就...`
+- `我就不说话了`
+- `我感觉...`
+- `我怀疑...`
+- `怎么越想越不对`
+- `单看都还行，放一起就不对了`
+
+These are examples of spoken reaction energy, not mandatory phrases. The goal is realism, not repeating a fixed list.
+
+Each article should feel like:
+- one concrete scene
+- one clear contradiction
+- 5-6 continuous observation panels
+- one final sentence worth forwarding
+- one believable human voice instead of "copywriting voice"
+
 Every article should include:
-- A soft but clear opening judgment.
-- A specific workplace moment discovered from research or chosen from the topic bank.
-- A money or energy anchor.
-- A relationship downgrade or emotional stop-loss line.
-- One absurd comparison.
+- A concrete opening scene rather than a broad mood statement.
+- One contradiction, mismatch, or behavior conflict that holds the whole article together.
+- A money, energy, time, or effort anchor when it strengthens the topic.
+- At least one detail panel that makes readers think `我也这样`.
 - One screenshot-worthy final line.
 
 Pair rhythm rules:
-- Each article has 5-6 groups. Each group covers one small feeling only.
-- Upper line: use a concrete everyday workplace scene, not a slogan.
-- Lower line: give a gentle turn, self-comfort, deadpan punchline, or small boundary.
-- Group progression should usually be: work positioning -> relationship downgrade -> money/energy anchor -> emotional stop-loss -> self-comfort.
+- Each article has 5-6 groups. Each group covers one small moment or one added observation only.
+- Upper line: use a concrete everyday scene, action, or setup, not a slogan.
+- Lower line: give a contradiction reveal, deadpan punchline, self-comfort, small boundary, or immediate real-person reaction.
+- Group progression should usually be: scene setup -> contradiction expands -> cost/energy/time lands -> one sharper recognition -> final relief or conclusion.
 - At most 2 lines per article may be sharply confrontational. Most lines should feel light, resigned, clear, and relatable.
 - Do not make every line sound like a title. Let some lines be simple and human.
+- Do not let adjacent groups feel like separate topics. They should read like one ongoing bit.
+- At least half of the lower lines in one article should sound like live reaction rather than abstract summary.
 
 Use hook patterns sparingly inside the pair:
 - Gentle contrast: `不是...只是...`
@@ -138,20 +200,31 @@ Avoid:
 - Defamation-risk claims.
 - Explicit cross-platform diversion.
 - `关注`, `转发`, `分享截图`, `进群`, `领福利`, `扫码`, `看完整版` calls to action unless the user explicitly asks for ad copy and risk review.
+- AI-sounding wrap-ups such as `我以为...其实...`, `本质上...`, `是一种...`, `成年人最___的状态`, unless they are truly the strongest line and have already been pressure-tested against a more spoken alternative.
+- Overly tidy conclusion lines that sound written to impress instead of spoken to complain.
 
 ## Research Workflow
 
 Research is the default workflow for full article generation, including empty input, "明天文案", topic ideation, or a named theme. Prioritize WeChat-adjacent text ecosystems first, then broader public text communities.
 
-1. Search lightly before generating copy. Prefer query combinations around `打工人`, `上班`, `职场`, `领导`, `同事`, `工资`, `内耗`, `加班`, `周报`, `开会`, `背锅`, `下班消息`.
+Topic validation before writing:
+1. Can the topic be pictured as one concrete scene?
+2. Is there one clear contradiction inside it?
+3. Can it naturally expand into at least 6 observations?
+4. Can the last line become a forwardable summary?
+
+If a candidate topic fails 2 or more of these checks, do not write it as a full article yet. Narrow it to a scene first.
+
+1. Search lightly before generating copy. Prefer query combinations around `打工人`, `上班`, `职场`, `领导`, `同事`, `工资`, `内耗`, `加班`, `周报`, `开会`, `背锅`, `下班消息`, plus life-adjacent scenes when needed such as `面试`, `发工资`, `超市`, `点外卖`, `熬夜`, `租房`, `花钱`.
 2. Prefer sources that reveal text-based workplace resonance: WeChat/公众号-adjacent search results, Zhihu, Weibo, Baidu search results and trend pages. Use Xiaohongshu/Douyin-style sources only as secondary language signals when available.
 3. Use search or platform tools only to identify emotions, scenes, recurring phrases, and topic structure.
 4. Build a `共鸣点池` with:
-   - workplace moment: leadership nickname changes, polite people receiving extra work, instant replies, blame-taking, forced responsibility, meeting loops, performance ambiguity
-   - emotion core: wronged, false impression, guilty, annoyed, drained, suddenly clear
-   - visual object: mirror, pot, shield, gear, phone popup, rice bowl, brick wall, badge, switch box, tangled yarn
-   - fit judgment: capybara-friendly, low aggression, safe to repost
-5. Choose one best-fit theme for the article and write original capybara-account copy.
+   - concrete scene: leadership nickname changes, polite people getting extra work, payday confidence, shopping overbuy, interview fake agreement, instant reply pressure, bedtime delay, commute costs
+   - contradiction: wants A but does B, saves here but overspends there, looks relaxed but is quietly calculating, says no in mind but says yes out loud
+   - emotion core: wronged, false impression, guilty, annoyed, drained, suddenly clear, tiny smugness, awkward pride
+   - visual object: mirror, pot, shield, gear, phone popup, salary slip, rice bowl, receipt, cart, wallet, clock, calendar, battery
+   - fit judgment: capybara-friendly, low aggression, safe to repost, strong enough for 5-6 connected panels
+5. Choose one best-fit scene plus one contradiction for the article and write original capybara-account copy.
 
 For research details, read `references/topic-research.md`.
 

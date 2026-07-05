@@ -6,23 +6,40 @@ Use these formulas to generate original workplace copy. They are patterns, not f
 
 Default article length: 10-12 image-ready lines, organized as 5-6 paired image groups.
 
+Best-performing articles usually come from:
+- one concrete scene
+- one contradiction or mismatch inside that scene
+- continuous observations that keep sharpening the same bit
+
 Use this format:
 
 - `第1组 上：...`
 - `第1组 下：...`
 
 Each pair should work as two related images:
-- Upper line: scene, problem, or small feeling.
-- Lower line: turn, relief, self-comfort, or deadpan punchline.
+- Upper line: scene, action, setup, or recognizable problem.
+- Lower line: contradiction reveal, relief, self-comfort, or deadpan punchline.
+
+Lower lines should usually sound like one of these:
+- a live reaction
+- a muttered complaint
+- a tiny self-exposed thought
+- a slightly embarrassed realization
+
+Lower lines should rarely sound like:
+- a polished life lesson
+- an abstract summary
+- a clean essay conclusion
+- a perfectly balanced slogan
 
 Default group progression:
 
-1. Work positioning: work is livelihood, not life.
-2. Relationship downgrade: coworkers/leaders/company are work relationships.
-3. Money or energy anchor: salary does not deserve emotional overinvestment.
-4. Specific scene: instant replies, meetings, overtime, weekly reports, team building, blame.
-5. Emotional stop-loss: keep energy, mood, and boundaries.
-6. Final comfort: give the reader a reason to feel less guilty.
+1. Concrete setup: where the person is and what they are doing.
+2. Contradiction appears: what they say they want versus what they keep doing.
+3. Cost lands: money, time, energy, effort, or embarrassment.
+4. Recognition deepens: one sharper panel that feels painfully familiar.
+5. Tension releases: deadpan clarity, self-comfort, or light surrender.
+6. Final line: one sentence readers want to forward.
 
 Do not make all 10-12 lines equally sharp. The article should feel like continuous self-comfort with a few memorable lines.
 
@@ -44,6 +61,33 @@ Do not make all 10-12 lines equally sharp. The article should feel like continuo
   - 上：`有些会开得像公司明天要上市`
   - 下：`但我只是想准点吃上晚饭`
 
+- Scene + live reaction:
+  - 上：`结账跳到100多`
+  - 下：`我一下就不说话了`
+- Scene + suspicious realization:
+  - 上：`每样看着都不贵`
+  - 下：`我感觉自己像被做局了`
+- Scene + self-exposed mutter:
+  - 上：`第二件半价`
+  - 下：`我又觉得不拿有点亏`
+
+## Scene-First Topic Shapes
+
+Use these before writing. If a topic fits one of these shapes, it is usually strong enough for a full article.
+
+- 行为打架型:
+  - `面试的时候什么都答应`
+  - `回家又不想去了`
+- 认知错位型:
+  - `不舍得花99`
+  - `却愿意花10个9.9`
+- 结果反差型:
+  - `累了一天`
+  - `发现只赚了8块钱`
+- 流水账收束型:
+  - list 6-8 small costs, actions, or interruptions
+  - end on one summary that reframes the whole list
+
 ## Title Formulas
 
 - `这点工资不配让我___`
@@ -56,6 +100,10 @@ Do not make all 10-12 lines equally sharp. The article should feel like continuo
 - `公司不是家，别把自己当___`
 - `你不是不努力，你是在___`
 - `打工人最稳定的___，是___`
+- `明明___，却___`
+- `我以为自己在___，其实一直在___`
+- `本来只想___，最后却___`
+- `___的时候，人会变得多离谱`
 
 ## High-Resonance Motifs
 
@@ -120,6 +168,34 @@ Pattern:
 - `上班只是谋生，不是把自己交出去`
 - `工作消耗不了你，才算你赢了`
 
+### 认知错位 / 小额破财
+
+Core emotion: self-exposed contradiction.
+
+Good angles:
+- 舍不得一次花大钱
+- 但很会分很多次小花
+- 想省钱
+- 结果特别会给自己找小借口
+
+Pattern:
+- `不舍得花99，却愿意花10个9.9`
+- `正价买不下手，满减凑得特别快`
+
+### 行为打架 / 嘴上和身体不同步
+
+Core emotion: ordinary self-contradiction.
+
+Good angles:
+- 想辞职但工作很认真
+- 想早睡但一直不睡
+- 想出门但在门口又坐回去了
+- 面试时什么都答应，回家又不想去了
+
+Pattern:
+- `嘴上说算了，身体还在继续`
+- `人已经准备好了，心又往回走了`
+
 ## Anti-Fatigue Rotation
 
 If a recent post used a salary anchor, the next post should use:
@@ -128,6 +204,10 @@ If a recent post used a salary anchor, the next post should use:
 - meeting nonsense
 - message anxiety
 - performance review
+- shopping math
+- bedtime contradiction
+- interview theater
+- payday illusion
 
 If a recent post used `这点工资不配`, avoid using it as the first line again. Use another surface:
 - `钱没到位，心别先到岗`
@@ -139,6 +219,26 @@ If a recent post used `这点工资不配`, avoid using it as the first line aga
 Weak: `上班真的很累`
 Strong: `上班最累的不是干活，是假装这点钱值得`
 More resonant: `有时候不是工作太重，是我太容易把它放在心上`
+
+Weak: `我最近好穷`
+Strong: `不舍得花99，却很会花10个9.9`
+More resonant: `我不是会花钱，我是擅长小额破财`
+
+Weak: `我以为自己花得很克制`
+Strong: `结账跳到100多`
+More resonant: `我一下就不说话了`
+
+Weak: `其实我是贵得比较分散`
+Strong: `单看它们都不贵`
+More resonant: `怎么凑一起就这么贵`
+
+Weak: `我是被几块几块凑出来的`
+Strong: `我不是自己想买这么多`
+More resonant: `我感觉超市给我做局了`
+
+Weak: `我最近不想出门`
+Strong: `都走到门口了，我又把自己劝回去了`
+More resonant: `不是不想去，是刚到玄关就突然觉得算了`
 
 Weak: `同事关系不用太认真`
 Strong: `同事只是共事，不是你人生的售后`

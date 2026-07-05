@@ -1,0 +1,7 @@
+interface:
+  display_name: "IP Comic Prompt Writer"
+  short_description: "Segment scene-based copy and create capybara IP comic prompts"
+  default_prompt: "Use $ip-comic-prompt-writer to analyze my image or long copy, extract and segment the visible text line by line, preserve locked prefixes such as 要饭： and 上班：, keep concrete scenes and contradictions intact, rewrite only where needed so the lines sound more like a real person reacting and less like a polished summary, then write complete standalone Chinese `gpt-image-2` prompts for every optimized sentence as a comic series using my finalized capybara IP. Every final prompt must use the fixed top-copy bottom-illustration structure: 上半部分写文案，下半部分写应景水豚画面."
+
+policy:
+  allow_implicit_invocation: true
