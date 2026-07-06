@@ -2,6 +2,31 @@
 
 These are account-specific performance signals supplied by the user. Use them as motif guidance, not as text to copy exactly.
 
+## Reference Pattern: Supermarket Small-Spend Story
+
+Observed structure:
+- The character enters a supermarket with one tiny goal, such as buying soy sauce or water.
+- Cheap signs such as 9.9, snacks, and second-item-half-price offers keep appearing.
+- Each item feels harmless alone.
+- The basket slowly fills without the character feeling like they made one big decision.
+- Checkout jumps to 100+.
+- The ending reframes the story as "I was not trying to buy so much; the supermarket slowly persuaded me."
+
+Winning factors:
+- It is a readable little story, not a list of slogans.
+- Every panel advances the same event.
+- The humor comes from ordinary self-exposure: wanting to save money but being moved by tiny bargains.
+- Visual continuity is strong: supermarket entrance, shelf, price tag, basket, checkout, receipt, exit.
+- The final turn makes the whole piece easy to retell.
+
+Recommended adaptation:
+- Use this as the default standard for story quality.
+- Start with one simple intention.
+- Add one new temptation, object, or reaction per group.
+- Let the basket, receipt, phone, door, or another object carry continuity.
+- End with a self-aware line that explains the whole chain.
+- Do not copy the exact wording or panel order from any reference image.
+
 ## 2026-05-15: Salary Does Not Deserve My Mood
 
 Observed performance:
@@ -72,10 +97,12 @@ Useful angle:
 ## Use In Future Posts
 
 Prioritize these families:
+- life-scene small stories with one visible contradiction
+- shopping math, bedtime delay, delivery-app coupons, doorway hesitation, commute fatigue
 - salary does not deserve emotional cost
 - absurd comparison between work and begging
 - coworkers as low-cost work relationships
 - emotional stop-loss and self-protection
 
 Do not overfit to one phrase. Rotate the complaint target and surface wording.
-Do not overfit to "sentence as slogan". The winning rhythm is closer to paired self-comfort: scene first, then emotional release.
+Do not overfit to "sentence as slogan". The winning rhythm is closer to a mini-story: scene first, continuous escalation, then emotional release.

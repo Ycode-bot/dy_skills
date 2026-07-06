@@ -1,90 +1,89 @@
 # Topic Research
 
-Use research only to find resonance points. Do not copy specific posts, titles, jokes, or layouts.
-
-Research is the default first step for full article generation. Keep it light: the goal is to discover today's emotions, contradictions, and scenes, then write original capybara-account copy.
+Use research only to find resonance points. Do not copy specific posts, titles, jokes, panel order, or layouts.
 
 ## Sources
 
 Priority order:
 
-1. WeChat-adjacent public text signals: WeChat/公众号 search snippets, Sogou Weixin-style results when available, article-title patterns visible in search results.
-2. Zhihu and Weibo: useful for broader workplace emotion, labor/salary/youth discussions, and "people are arguing about this" signals.
-3. Baidu search and Baidu Index-style signals: useful for longer-term search demand and related query clusters.
-4. Xiaohongshu/Douyin-style sources: use only as secondary language and scenario signals; rewrite into WeChat Official Account tone.
+1. WeChat/Xiaohongshu-adjacent public text signals: titles, comments, search snippets, visible topic patterns.
+2. Weibo/Zhihu/Baidu: broader arguments and recurring emotions.
+3. Daily life signals from the user's reference images or drafts: scene, object, emotion, contradiction, story arc.
 
-Good query seeds:
-- `打工人 上班 职场 领导`
-- `打工人 工资 情绪 内耗`
-- `职场 同事 边界感`
-- `领导 喜欢 像自己的人`
-- `下班 工作消息 秒回`
-- `老实人 背锅 职场`
-- `周报 开会 职场 吐槽`
-- `绩效 玄学 职场`
-- `发工资 打工人 吐槽`
-- `不舍得花大钱 却一直花小钱`
-- `面试 吹牛 回家不想去`
+## Query Seeds
+
+Use a mix of life and workplace scenes:
+
+- `超市 只想买一样 最后买一堆`
+- `9块9 第二件半价 小额破财`
+- `每样都不贵 结账 100多`
 - `想早睡 结果熬夜`
-- `只想买一样 最后买一堆`
+- `外卖 满减 省钱 反而更贵`
+- `下班 路过便利店 买零食`
+- `不想出门 到门口 又坐回去`
+- `通勤 地铁 打工人 疲惫`
+- `下班 工作消息 秒回`
+- `同事 边界感 打工人`
 
 ## Extraction Template
 
-For each candidate trend, extract:
+For each candidate:
 
 - Keyword:
-- Heat reason:
-- Reader emotion:
-- Workplace scene:
-- Common sentence pattern:
-- Visual object:
+- Concrete scene:
+- Starting intention:
+- Escalation details:
+- Contradiction:
+- Live reaction:
+- Visual objects:
 - Fit for capybara IP:
 - Safe original angle:
 - Risky wording to avoid:
 
 ## Resonance Pool
 
-After research, form a `共鸣点池` before writing:
+Good scenes:
+- Supermarket: only buying one thing, then trapped by discounts.
+- Convenience store: buying water, leaving with snacks.
+- Delivery app: saving money through coupons, total rising.
+- Bedtime: checking one message, losing one hour.
+- Doorway: fully dressed, then cancelling internally.
+- Subway/commute: small delays stacking into exhaustion.
+- Office: one message pulls the mind back after work.
+- Restaurant: ordering light, adding sides one by one.
 
-- 具体场景: one concrete scene people can picture, such as polite people getting extra work, payday confidence, shopping overbuy, opening the delivery app again, instant reply pressure, weekly report loops, interview overpromising, bedtime delay.
-- 核心矛盾: wants A but keeps doing B; looks frugal but spends more; wants rest but keeps scrolling; says yes outside and no at home.
-- 情绪核心: wronged, false impression, guilty, annoyed, drained, embarrassed, suddenly clear, quietly relieved, lightly smug.
-- 可视化道具: mirror, copier, pot, shield, gear, phone popup, salary slip, rice bowl, receipt, cart, wallet, badge, switch box, tangled yarn, clock, calendar, battery.
-- 适配判断: whether the topic is low-aggression, safe to repost, capybara-friendly, and strong enough for 5-6 connected panels.
+Good contradictions:
+- Wants to save money but follows every discount.
+- Wants to rest but keeps giving time away.
+- Wants to be social but energy leaves first.
+- Wants to be efficient but gets trapped by tiny decisions.
+- Looks calm outside but is calculating inside.
+- Says "just this once" several times in a row.
 
-Choose exactly one core scene and one core contradiction for the article. Do not combine several unrelated trending topics into one post.
+Good visual anchors:
+- Shopping basket, receipt, checkout screen, price tag, 9.9 sign, second-item-half-price label.
+- Phone, delivery app, coupon, charger, clock, bed, slippers.
+- Door, shoes, keys, umbrella, sofa, mirror.
+- Work badge, phone popup, laptop, meeting room, calendar.
 
-## What To Keep
+## Language Filter
 
-- Emotional direction: resentment, exhaustion, relief, helplessness, tiny joy.
-- Scene specificity: meetings, salary day, group chats, boss comments, team building, checkout counters, interview rooms, bedtime, commute, shopping carts.
-- Sentence rhythm: contrast, translation, absurd comparison, cold truth.
-- Spoken-reaction language: the kind of thing someone would blurt out right after the moment happened.
-- Search terms users might recognize.
-- Topic structure: "I used to think X, later realized Y", "the problem is not A but B", "this workplace scene is absurd because Z".
-- Topic contradictions: "明明___，却___", "本来只想___，最后___", "以为自己在___，其实一直在___".
+After choosing a topic, translate the angle into ordinary speech:
 
-## What To Avoid
-
-- Copying titles or punchlines.
-- Mimicking a competitor's exact structure.
-- Copying character concepts, panel sequencing, watermark placement, or visual identity from competitor images.
-- Naming real companies or real people.
-- Turning workplace jokes into harassment, defamation, or sexualized speculation.
-- Directing users across platforms with explicit calls like `去公众号看完整版`.
-- Treating a real controversy as a direct accusation. Generalize it into a common workplace feeling instead.
-- Writing lines that sound like a post-hoc essay summary instead of an in-the-moment reaction.
-- Overusing polished wrap-up frames such as `我以为/其实`, `本质上`, `是一种`, `最___的状态`.
+- Use things people say in real life: `我都懵了`, `这不对吧`, `我就知道没这么简单`, `来都来了`, `不拿好像亏了`.
+- Use small, cheap, visible details before abstract emotion.
+- Avoid high-end, literary, philosophical, or brand-campaign language.
+- If a draft line needs readers to "品", it is probably too high. Make it plainer.
 
 ## Research-To-Copy Workflow
 
-1. Search 3-5 related keyword combinations.
+1. Search 3-5 related keyword combinations when current signals matter.
 2. Group findings into 2-3 scene-plus-contradiction clusters.
-3. Build a 3-5 item research summary in your own words.
-4. Choose one core scene and one contradiction for the article.
-5. Generate 10-12 original image-ready lines in 5-6 paired groups.
-6. Add `画面关键词` for each group so the image prompt skill has concrete props.
-7. Check anti-fatigue: compare against recent posts and rotate the surface pattern.
+3. Choose one story chain, not several hot topics.
+4. Build a beat sheet: 起因 -> 误入 -> 加码 -> 失控 -> 账单 -> 反应 -> 收束.
+5. Generate 10-14 original image-ready lines in 5-7 paired groups.
+6. Add visual keywords for each group.
+7. Check that the copy reads like a story and not a slogan list.
 8. Add compliant interaction questions.
 9. Output exactly 3 broad/high-traffic hashtags.
 
@@ -93,14 +92,13 @@ Choose exactly one core scene and one core contradiction for the article. Do not
 Use only 3 hashtags. Prefer broad tags over long-tail clutter.
 
 Default set:
-- `#打工人日常`
-- `#职场边界感`
+- `#生活碎片`
 - `#情绪止损`
+- `#打工人日常`
 
-Replace one tag when the theme is clearly stronger:
-- salary: `#工资`
-- coworkers: `#同事关系`
-- leadership: `#领导`
-- overtime: `#加班`
-- meetings: `#开会`
-- weekly reports: `#周报`
+Replace one tag when the scene is clearer:
+- shopping: `#小额破财`
+- sleep: `#熬夜`
+- food delivery: `#外卖`
+- commute: `#通勤`
+- workplace: `#职场边界感`

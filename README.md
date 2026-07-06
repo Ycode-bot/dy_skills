@@ -52,7 +52,7 @@ ls ~/.agents/skills
 - `content-pipeline-migrator`: Scans Markdown/content pipelines and proposes batch migrations.
 - `multi-repo-sync-guard`: Detects cross-repo duplicated modules and generates sync checklists.
 - `activity-cms-psd`: Converts annotated activity PSDs into activityincms import JSON, sliced assets, theme notes, and UI/operator handoff docs.
-- `workplace-viral-copywriter`: Generates viral Chinese workplace copy for a capybara IP WeChat account, including topic judgment, titles, 5-6 paired two-line image groups, cover hooks, interaction questions, and hashtags.
+- `workplace-viral-copywriter`: Generates story-first Chinese social copy for a capybara IP WeChat/Xiaohongshu account, covering life and workplace scenes with readable mini-stories, paired comic captions, cover hooks, interaction questions, and hashtags.
 - `tinify-image-compressor`: Compresses, resizes, converts, and metadata-preserves local image batches with Tinify's Node.js API while keeping originals untouched by default.
 - `cloudflare-auto-deployer`: Detects whether a repo targets Cloudflare Pages or Workers, verifies credentials, prints safe Wrangler deployment plans, and can generate GitHub Actions workflows.
 
