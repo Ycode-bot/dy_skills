@@ -1,0 +1,4 @@
+interface:
+  display_name: "项目 SEO 集成器"
+  short_description: "扫描项目现有 SEO 体系并按既有规范补齐、生成及验证页面配置"
+  default_prompt: "使用 $project-seo-integrator 扫描当前项目，并按现有架构完善页面 SEO、结构化数据和爬虫配置。"

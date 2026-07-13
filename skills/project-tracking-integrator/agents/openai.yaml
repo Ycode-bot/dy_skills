@@ -1,0 +1,4 @@
+interface:
+  display_name: "多平台项目埋点集成器"
+  short_description: "扫描神策与 GA/GTM 等平台并按事件要求生成单报或双报埋点"
+  default_prompt: "使用 $project-tracking-integrator 扫描当前项目，识别每个事件需要神策、GA/GTM 单报还是双报，并生成符合现有规范的补丁。"
