@@ -107,6 +107,7 @@ export CLOUDFLARE_ACCOUNT_ID="your-account-id"
 node scripts/cloudflare-deploy.mjs detect /path/to/project
 node scripts/cloudflare-deploy.mjs deploy /path/to/project
 node scripts/cloudflare-deploy.mjs github-action /path/to/project
+node scripts/cloudflare-deploy.mjs bootstrap-pages /path/to/frontend --apply
 ```
 
 You can also install dependencies manually:
