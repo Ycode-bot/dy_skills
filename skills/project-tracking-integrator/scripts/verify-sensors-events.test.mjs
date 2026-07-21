@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import {
     buildSensorsSql,
@@ -9,6 +12,7 @@ import {
     parseEventRows,
     parseOpenApiRows,
     querySensorsEvent,
+    resolveCredentialsFile,
 } from './verify-sensors-events.mjs';
 
 const contract = normalizeContract({
@@ -66,6 +70,27 @@ test('a #K- API Key automatically selects Sensors OpenAPI mode', () => {
     });
     assert.equal(profile.authMode, 'openapi');
     assert.equal(profile.queryPath, '');
+});
+
+test('resolveCredentialsFile prefers explicit, environment, then existing default profile', async () => {
+    assert.equal(
+        await resolveCredentialsFile({ credentials: './explicit.json' }, { SENSORS_QUERY_CREDENTIALS_FILE: './environment.json' }, '/missing/default.json'),
+        path.resolve('./explicit.json'),
+    );
+    assert.equal(
+        await resolveCredentialsFile({ credentials: '' }, { SENSORS_QUERY_CREDENTIALS_FILE: './environment.json' }, '/missing/default.json'),
+        path.resolve('./environment.json'),
+    );
+
+    const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'sensors-credentials-test-'));
+    try {
+        const defaultFile = path.join(temporary, 'credentials.json');
+        await fs.writeFile(defaultFile, '{}', 'utf8');
+        assert.equal(await resolveCredentialsFile({ credentials: '' }, {}, defaultFile), path.resolve(defaultFile));
+    }
+    finally {
+        await fs.rm(temporary, { recursive: true, force: true });
+    }
 });
 
 test('normalizeContract accepts a version 2 required Sensors target', () => {

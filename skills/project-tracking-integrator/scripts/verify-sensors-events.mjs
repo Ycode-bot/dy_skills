@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { isDeepStrictEqual } from 'node:util';
@@ -10,12 +11,13 @@ const DEFAULT_QUERY_PATH = '/api/sql/query';
 const DEFAULT_OPENAPI_QUERY_PATH = '/api/v3/analytics/v1/model/sql/query';
 const DEFAULT_LIMIT = 100;
 const DEFAULT_SINCE_MINUTES = 30;
+const DEFAULT_CREDENTIALS_FILE = path.join(os.homedir(), '.config', 'imastudio', 'sensors-credentials.json');
 const SENSITIVE_FIELD_PATTERN = /(token|secret|password|authorization|cookie|email|phone|mobile|account|userinfo)/i;
 
 const HELP_TEXT = `Sensors Analytics event verifier
 
 Compare a normalized tracking contract with captured events or query Sensors Analytics.
-Credentials are read only from environment variables and are never accepted as CLI arguments.
+Secrets are read only from environment variables or a private Profile JSON and are never accepted as CLI arguments.
 
 Usage:
   node scripts/verify-sensors-events.mjs --spec <contract.json> --actual <events.json|ndjson>
@@ -27,7 +29,7 @@ Required:
   --query                       Query Sensors Analytics instead of reading --actual
 
 Query options:
-  --credentials <path>          Profile JSON with default_profile and profiles
+  --credentials <path>          Profile JSON; env SENSORS_QUERY_CREDENTIALS_FILE
   --profile <name>              Profile name; defaults to file's default_profile
   --base-url <url>              Query service base URL; env SENSORS_QUERY_BASE_URL
   --project <name>              Sensors project; env SENSORS_QUERY_PROJECT
@@ -46,6 +48,7 @@ Output options:
   --help                        Show this help
 
 Credential environment variables:
+  profile file: SENSORS_QUERY_CREDENTIALS_FILE (fallback: ~/.config/imastudio/sensors-credentials.json)
   token-query: SENSORS_QUERY_API_SECRET (fallback SENSORS_QUERY_TOKEN or SENSORS_API_KEY)
   bearer/header: SENSORS_QUERY_API_KEY (fallback SENSORS_API_KEY)
 
@@ -273,6 +276,22 @@ async function loadCredentialProfile(filePath, profileName, dryRun = false) {
         fail(`credentials profile ${profile.name} still contains example placeholders; copy the example and replace hosts, project, and api_key`);
     }
     return profile;
+}
+
+async function resolveCredentialsFile(options, env = process.env, defaultPath = DEFAULT_CREDENTIALS_FILE) {
+    if (options.credentials) {
+        return path.resolve(options.credentials);
+    }
+    if (env.SENSORS_QUERY_CREDENTIALS_FILE) {
+        return path.resolve(env.SENSORS_QUERY_CREDENTIALS_FILE);
+    }
+    try {
+        const stat = await fs.stat(defaultPath);
+        return stat.isFile() ? path.resolve(defaultPath) : '';
+    }
+    catch {
+        return '';
+    }
 }
 
 function parseEventRows(raw) {
@@ -843,6 +862,10 @@ async function run(argv = process.argv.slice(2), env = process.env) {
         return 0;
     }
 
+    if (options.query) {
+        options = { ...options, credentials: await resolveCredentialsFile(options, env) };
+    }
+
     if (options.credentials) {
         options = {
             ...options,
@@ -903,6 +926,7 @@ export {
     parseEventRows,
     querySensorsEvent,
     redactValue,
+    resolveCredentialsFile,
     resolveQueryConfig,
     run,
 };

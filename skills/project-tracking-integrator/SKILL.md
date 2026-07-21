@@ -1,15 +1,15 @@
 ---
 name: project-tracking-integrator
-description: Discover, bootstrap, extend, implement, and verify product analytics across Sensors Analytics, GA4, Google Tag Manager, Google Ads, Segment, Mixpanel, Amplitude, and PostHog. Use when Codex needs to scan a project for an existing 埋点体系, establish the smallest coherent tracking foundation when none exists, convert a data-team spreadsheet/screenshot/document into a multi-platform event contract, create typed business tracking methods, instrument real business triggers, audit missing or duplicate events, capture browser/SDK payloads, query 神策入库数据 with read-only credentials, or produce an end-to-end tracking acceptance report.
+description: Discover, bootstrap, extend, implement, and verify product analytics across Sensors Analytics, GA4, Google Tag Manager, Google Ads, Segment, Mixpanel, Amplitude, and PostHog. Use when Codex needs to scan a project for an existing 埋点体系, establish a tracking foundation, convert a data-team spreadsheet/screenshot/document into an event contract, create business tracking methods, instrument triggers, audit code, validate 上报数据准确性, query 神策入库数据, compare required fields with actual platform data, or produce an end-to-end acceptance report. Treat requests about 上报数据、数据准确性、字段值是否正确、是否有数据 as live data verification rather than source-code audit unless the user explicitly asks to inspect code.
 ---
 
 # Project Tracking Integrator
 
-Treat tracking as a lifecycle, not a single code edit:
+Treat tracking as a set of composable capabilities, not a mandatory checklist. Run the full lifecycle only when the user explicitly requests end-to-end integration or acceptance:
 
 `discover → classify → contract → build/extend → instrument → verify source → verify runtime → verify ingestion → report`
 
-Do not declare completion until the required evidence layers agree. Code presence does not prove a reachable trigger, a successful request does not prove ingestion, and a same-named ingested event does not prove the property contract.
+For narrower requests, stop as soon as the requested outcome is complete. Do not run downstream stages merely because the Skill supports them.
 
 ## 0. Check for Skill updates
 
@@ -29,6 +29,58 @@ The updater downloads `Ycode-bot/dy_skills@project-tracking-integrator` from the
 
 Set `PROJECT_TRACKING_INTEGRATOR_AUTO_UPDATE=0` to disable one run. Override the trusted source or branch only when explicitly requested with `PROJECT_TRACKING_INTEGRATOR_SKILL_SOURCE=owner/repo@project-tracking-integrator` or `PROJECT_TRACKING_INTEGRATOR_UPDATE_REF=<ref>`.
 
+## 1. Route by user intent before using project tools
+
+Select one primary mode from the user's requested outcome before scanning files, spawning parallel work, modifying code, opening a browser, or querying an API. State the selected mode in one short sentence. Treat explicit scope words such as “只”, “仅”, “不要”, “不需要”, and “先” as binding constraints.
+
+| Mode | Typical request | Execute | Stop before |
+|---|---|---|---|
+| `discover` | “看看有没有埋点体系”“盘点神策和 GA” | Repository discovery and classification | Contract generation, code changes, runtime/API verification |
+| `contract` | “把这张埋点截图整理成契约” | Requirement transcription and Version 2 contract | Repository scan, code changes, API query |
+| `generate-method` | “生成埋点方法”“增加 trackXxx wrapper” | Minimum architecture lookup, contract normalization, wrapper implementation, narrow static check | Business call-site instrumentation, browser validation, platform query |
+| `instrument` | “给这个业务流程埋点” | Minimum architecture lookup, contract, wrapper and requested business call sites, narrow source checks | Live platform query and end-to-end report unless requested |
+| `verify-source` | “检查代码实现”“审计 wrapper”“对照文档检查调用点” | Requirement contract plus relevant wrappers/call sites and static checks | Browser actions and platform query unless requested |
+| `verify-runtime` | “检查抓到的请求对不对”“对比 Network payload” | Contract plus captured SDK/browser payload | Repository-wide scan, code changes, ingestion query |
+| `verify-data` | “检测上报数据准确性”“字段值对不对”“检查我埋的数据”“神策有没有数据”“对比截图和神策入库” | Screenshot/document contract, direct read-only platform query, field/count comparison | Repository scan, GA/GTM inventory, wrapper/call-site audit, code changes |
+| `full-lifecycle` | “从零接入并完整验收”“实现后验证源码、发送和入库” | All explicitly relevant lifecycle stages | Nothing required by the agreed acceptance contract |
+
+Use these routing rules:
+
+1. Prefer the narrowest mode that fully satisfies the request.
+2. If the user explicitly requests multiple outcomes, compose only those modes in dependency order; do not append unrequested modes.
+3. Run repository discovery only when code architecture is a prerequisite. A screenshot-to-Sensors comparison does not require a project scan.
+4. Query a live analytics API only in `verify-data` or an explicitly requested `full-lifecycle`/combined mode.
+5. Modify code only in `generate-method`, `instrument`, or an explicitly requested full implementation mode.
+6. Inspect GA/GTM/Google Ads only when the request or contract includes those targets.
+7. Generate the combined acceptance report only in `full-lifecycle` or when the user asks for that report.
+8. Do not start parallel audit tracks for unrelated events or platforms in a narrow mode.
+
+If the request is ambiguous, use data-vs-code nouns as the deciding signal:
+
+- “上报数据”“数据准确性”“实际数据”“字段值是否正确”“有没有数据”“神策数据”“入库数据”“查询 API” select `verify-data`, especially when a requirement screenshot/table is attached.
+- Only an explicit request about “代码实现”“wrapper”“方法定义”“调用点”“源码是否一致” selects `verify-source` or `generate-method`.
+
+When both code and data language appear, prefer `verify-data` if the requested conclusion is about actual reported values. Ask one focused question only when the missing distinction materially changes the action.
+
+### Mandatory evidence rule for `verify-data`
+
+`verify-data` is not complete until a platform query was attempted. Apply these non-negotiable rules:
+
+1. Call the configured read-only analytics API before drawing a conclusion.
+2. Never substitute source files, wrapper reachability, Tracking Maps, or static checks for actual platform data.
+3. Never return `INCOMPLETE` merely because source/runtime evidence was not collected; those layers are outside this mode.
+4. If credentials, project, time range, or a safe filter are missing, return `BLOCKED` with only the minimum missing input. Do not switch to source audit.
+5. If the API request fails, return `QUERY_FAILED`; if it succeeds with no rows, return `NOT_FOUND`.
+6. Return `PASS`, `NOT_FOUND`, `COUNT_MISMATCH`, `DUPLICATED`, `CONTRACT_MISMATCH`, `BLOCKED`, or `QUERY_FAILED` for every requested event. A prose code review is not a valid result.
+
+### Narrow-mode examples
+
+- `$project-tracking-integrator [截图] 检查埋点数据对不对` → `verify-data`: transcribe the screenshot, query the specified platform, compare, and stop. Do not scan the repository.
+- `$project-tracking-integrator [截图] 检测上报数据的准确性` → `verify-data`: query the configured Sensors project and compare actual ingested values. Do not run `verify-tracking-source.mjs`.
+- `$project-tracking-integrator 根据这份文档生成对应的埋点方法` → `generate-method`: locate the existing transport and nearest wrapper pattern, add the method, run a narrow static check, and stop. Do not add business call sites or query Sensors.
+- `$project-tracking-integrator 给支付成功流程加埋点` → `instrument`: implement the requested wrapper and call site, run source checks, and stop before live data verification.
+- `$project-tracking-integrator 完整接入这些事件并验证神策入库` → `full-lifecycle`: run the relevant end-to-end stages.
+
 ## Authorization and safety
 
 - Use read-only discovery and local static verification without asking for extra permission.
@@ -38,7 +90,7 @@ Set `PROJECT_TRACKING_INTEGRATOR_AUTO_UPDATE=0` to disable one run. Override the
 - Never place secrets in source code, client-visible environment variables, CLI arguments, prompts, screenshots, or reports.
 - Keep raw queried user events out of reports; return redacted differences only.
 
-## 1. Discover the repository
+## Capability: Discover the repository
 
 Read applicable repository instructions, manifests, framework configuration, and tracking documentation. Run the deterministic scanner first when local Node.js is available:
 
@@ -53,7 +105,7 @@ Then follow the reported evidence through imports and reachable call sites. Read
 
 Inventory platforms independently from event routing. Detect initialization, configuration, consent, identity, common properties, vendor transport, business wrappers, calls, documentation, and validation. Static scanner output is evidence, not proof; inspect ambiguous findings manually.
 
-## 2. Classify before designing
+## Capability: Classify before designing
 
 Classify every platform, then the repository:
 
@@ -65,7 +117,7 @@ When the user asks to implement an absent system, read [references/bootstrap-arc
 
 When multiple platforms exist or the requirement mentions GA, GTM, Google Ads, 神策, or dual reporting, read [references/multi-platform-routing.md](references/multi-platform-routing.md). Never infer dual reporting from installed SDKs.
 
-## 3. Normalize the data requirement
+## Capability: Normalize the data requirement
 
 Transcribe text, table, CSV, spreadsheet, screenshot, or document requirements into a Version 2 contract using:
 
@@ -84,7 +136,7 @@ Preserve valid data-team names. Flag ambiguities instead of guessing. Resolve `u
 
 For Sensors events that share a generic name such as `ima_function_click`, always add a stable `match` discriminator such as `btn_name`.
 
-## 4. Build or extend the implementation
+## Capability: Build or extend the implementation
 
 For an established or partial system:
 
@@ -103,7 +155,9 @@ For semantics:
 - For multiple required targets, derive shared context once and map separate vendor payloads from one business trigger.
 - Do not send raw email, phone, token, free-form content, or other personal data without an explicit approved policy.
 
-## 5. Verify source evidence
+In `generate-method`, inspect only enough code to find the established transport and nearest analogous wrapper. If the system is established, implement the requested business method and stop after narrow static validation. Do not add its business call site unless the user also requests instrumentation. If no credible system exists, surface or build only the minimum missing foundation authorized by the user.
+
+## Capability: Verify source evidence
 
 After implementation, enrich each required target with its expected `wrapper`, then run:
 
@@ -119,7 +173,7 @@ Inspect reported files. The script checks exact event/match/property literals an
 
 Also run the repository's narrow tests, tracking checks, lint, and type checks in proportion to the change.
 
-## 6. Verify runtime evidence
+## Capability: Verify runtime evidence
 
 Trigger each event with a test identity and capture the actual payload using the platform's supported debug surface:
 
@@ -150,7 +204,25 @@ For GA4, GTM, Google Ads, or another manually inspected target, record the evide
 
 Verify required targets independently and confirm disabled targets do not fire. Do not claim runtime success from source inspection alone.
 
-## 7. Verify Sensors ingestion
+## Capability: Verify platform ingestion
+
+In `verify-data`, do not begin with repository discovery. Follow this minimal path:
+
+1. Transcribe only the requested events, match selectors, properties, expected values, and count constraints from the supplied screenshot/document into a temporary contract.
+2. Use the specified platform and configured read-only credential. Do not infer additional targets.
+3. Query the shortest practical time window, using the provided test identity or stable match fields.
+4. Compare expected and actual event name, fields, types, values, enums, and counts.
+5. Return a compact per-event result table plus any query limitation, then stop.
+
+Resolve Sensors query configuration in this order without printing secrets:
+
+1. Explicit credential path/profile from the user or current conversation.
+2. `SENSORS_QUERY_CREDENTIALS_FILE` and the query environment variables.
+3. The existing private file `~/.config/imastudio/sensors-credentials.json` when present.
+
+The verifier discovers options 2 and 3 automatically. When any configured option is available, run the API query instead of asking the user to configure it again.
+
+If the query would be too broad because both a test identity and stable selector are missing, ask only for the minimum missing filter. Do not compensate by auditing wrappers, Tracking Maps, GA/GTM, or unrelated events.
 
 When a required Sensors target must be checked for ingestion, read [references/sensors-verification.md](references/sensors-verification.md). Use the configured private Profile JSON or environment variables; never use the frontend `server_url` as a query endpoint.
 
@@ -182,7 +254,7 @@ node <skill-dir>/scripts/verify-sensors-events.mjs \
 
 Keep `QUERY_FAILED` distinct from `NOT_FOUND`. Check project, environment, identity, time window, ingestion delay, credential, endpoint, and permission before concluding that an event is absent.
 
-## 8. Generate the final acceptance report
+## Capability: Generate the final acceptance report
 
 Combine all available evidence:
 
@@ -209,12 +281,17 @@ Interpret final states consistently:
 
 ## Delivery format
 
-Return or create these artifacts when the scope permits:
+Return only the artifact required by the selected mode. Do not pad a narrow request with lifecycle sections the user did not request.
 
-1. `Scan Findings`: platforms, classification, evidence, risks, and missing foundation.
-2. `Tracking Contract`: normalized Version 2 JSON and unresolved decisions.
-3. `Implementation`: changed wrappers, call sites, infrastructure, documentation, and tests.
-4. `Verification Evidence`: source, runtime, and ingestion results kept separate.
-5. `Acceptance Report`: per-event and per-platform matrix with remaining actions.
+- `discover` → platform inventory, classification, evidence, and risks.
+- `contract` → normalized contract and unresolved decisions.
+- `generate-method` → wrapper change and narrow static result.
+- `instrument` → wrapper/call-site changes and narrow source result.
+- `verify-source` → source/document difference report.
+- `verify-runtime` → captured-payload difference report.
+- `verify-data` → platform query comparison and clear PASS/FAIL/QUERY_FAILED result.
+- `full-lifecycle` → scan, contract, implementation, separate evidence layers, and combined acceptance report.
+
+In full-lifecycle mode, do not declare completion until all required evidence layers agree. Code presence does not prove a reachable trigger, a successful request does not prove ingestion, and a same-named ingested event does not prove the property contract.
 
 For ImaStudio, `@joyme/sensors-data`, `KEWLSensors`, `ima_function_click`, `dataLayer`, `lib/track`, or `docs/tracking-map`, read [references/imastudio-pattern.md](references/imastudio-pattern.md) before modifying or validating the project.

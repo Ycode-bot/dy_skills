@@ -1,4 +1,4 @@
 interface:
   display_name: "埋点全生命周期集成与验收器"
   short_description: "扫描、建设和实施多平台埋点，并验证源码、发送与平台入库结果"
-  default_prompt: "使用 $project-tracking-integrator 扫描当前项目，根据数据埋点文档完成接入，并输出源码、运行时和平台入库的端到端验收报告。"
+  default_prompt: "使用 $project-tracking-integrator 根据我的提示选择最小工作模式；提到上报数据准确性时必须查询分析平台并对比实际数据，不能用源码审计代替。"
