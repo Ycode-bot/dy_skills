@@ -85,18 +85,18 @@ After choosing a topic, translate the angle into ordinary speech:
 6. Add visual keywords for each group.
 7. Check that the copy reads like a story and not a slogan list.
 8. Add compliant interaction questions.
-9. Output exactly 3 broad/high-traffic hashtags.
+9. Output exactly 3 hashtags: fixed IP tag `#卡皮巴拉` first, followed by two broad/high-traffic tags matched to the current story.
 
 ## Default Hashtag Policy
 
-Use only 3 hashtags. Prefer broad tags over long-tail clutter.
+Use only 3 hashtags. Always place `#卡皮巴拉` first to build a stable IP identity. Choose the remaining two from the concrete scene and emotional resonance, preferring broad tags over long-tail clutter.
 
 Default set:
+- `#卡皮巴拉`
 - `#生活碎片`
 - `#情绪止损`
-- `#打工人日常`
 
-Replace one tag when the scene is clearer:
+Keep `#卡皮巴拉` unchanged. Replace either of the other two tags when the scene is clearer:
 - shopping: `#小额破财`
 - sleep: `#熬夜`
 - food delivery: `#外卖`

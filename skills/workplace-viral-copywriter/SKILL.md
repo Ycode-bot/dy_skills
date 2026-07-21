@@ -80,7 +80,9 @@ Unless the user asks for a different format, output these sections in Chinese:
    - Give 2-4 compliant article-ending questions.
    - Do not induce following, sharing, reposting, screenshots, group joining, reward collection, or cross-platform diversion.
 8. `话题标签`
-   - Give exactly 3 broad/high-traffic hashtags with `#`.
+   - Give exactly 3 hashtags with `#`.
+   - The first tag must always be `#卡皮巴拉` as the account's fixed IP identifier.
+   - Choose the other two tags for the current story's concrete scene and resonance point; prefer broad, natural tags over invented or overly long tags.
 
 If the user asks for only one section, output only that section.
 
@@ -138,7 +140,7 @@ For a full article with no supplied topic:
 3. Choose one scene with the strongest story chain.
 4. Draft the 5-7 paired groups as one continuous mini-story.
 5. Check that every line is imageable and belongs to the same story.
-6. Add title options, visual keywords, cover lines, interaction questions, and 3 tags.
+6. Add title options, visual keywords, cover lines, interaction questions, and 3 tags, with `#卡皮巴拉` always first.
 
 For story patterns and examples, read [references/viral-formulas.md](references/viral-formulas.md).
 For research prompts and motif pools, read [references/topic-research.md](references/topic-research.md).
