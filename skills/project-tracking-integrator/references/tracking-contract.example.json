@@ -1,0 +1,66 @@
+{
+  "$schema": "./tracking-contract.schema.json",
+  "version": 2,
+  "defaults": {
+    "sinceMinutes": 30,
+    "minCount": 1,
+    "maxCount": 1
+  },
+  "events": [
+    {
+      "id": "discount-popup-claim-click",
+      "businessEvent": "领取优惠弹窗权益",
+      "trigger": "用户点击可用状态的优惠弹窗领取按钮",
+      "owner": {
+        "page": "community",
+        "component": "DiscountPopup"
+      },
+      "timing": "click",
+      "deduplication": {
+        "strategy": "one-per-user-action",
+        "minCount": 1,
+        "maxCount": 1
+      },
+      "targets": {
+        "sensors": {
+          "status": "required",
+          "event": "ima_function_click",
+          "wrapper": "trackDiscountPopupClaim",
+          "match": {
+            "btn_name": "discount_popup_claim_click"
+          },
+          "properties": {
+            "f_page": {
+              "required": true,
+              "type": "string",
+              "equals": "community"
+            },
+            "btn_position": {
+              "required": true,
+              "type": "string",
+              "oneOf": [
+                "ai-creation",
+                "canvas-editor"
+              ]
+            },
+            "btn_name": {
+              "required": true,
+              "type": "string",
+              "equals": "discount_popup_claim_click"
+            }
+          },
+          "validation": {
+            "runtimeEvidence": "browser-network",
+            "ingestionEvidence": "sensors-query-api"
+          }
+        },
+        "ga4": {
+          "status": "disabled"
+        }
+      },
+      "validation": {
+        "testIdentityRequired": true
+      }
+    }
+  ]
+}

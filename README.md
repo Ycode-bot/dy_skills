@@ -18,6 +18,7 @@ npx skills add Ycode-bot/dy_skills@activity-cms-psd -y -g
 npx skills add Ycode-bot/dy_skills@workplace-viral-copywriter -y -g
 npx skills add Ycode-bot/dy_skills@tinify-image-compressor -y -g
 npx skills add Ycode-bot/dy_skills@cloudflare-auto-deployer -y -g
+npx skills add Ycode-bot/dy_skills@project-tracking-integrator -y -g
 ```
 
 Install all at once:
@@ -27,7 +28,8 @@ npx skills add Ycode-bot/dy_skills@i18n-structure-refactor -y -g && \
 npx skills add Ycode-bot/dy_skills@activity-cms-psd -y -g && \
 npx skills add Ycode-bot/dy_skills@workplace-viral-copywriter -y -g && \
 npx skills add Ycode-bot/dy_skills@tinify-image-compressor -y -g && \
-npx skills add Ycode-bot/dy_skills@cloudflare-auto-deployer -y -g
+npx skills add Ycode-bot/dy_skills@cloudflare-auto-deployer -y -g && \
+npx skills add Ycode-bot/dy_skills@project-tracking-integrator -y -g
 ```
 
 Verify installation:
@@ -43,6 +45,7 @@ ls ~/.agents/skills
 - `workplace-viral-copywriter`: Generates story-first Chinese social copy for a capybara IP WeChat/Xiaohongshu account, covering life and workplace scenes with readable mini-stories, paired comic captions, cover hooks, interaction questions, and hashtags.
 - `tinify-image-compressor`: Compresses, resizes, converts, and metadata-preserves local image batches with Tinify's Node.js API while keeping originals untouched by default.
 - `cloudflare-auto-deployer`: Detects whether a repo targets Cloudflare Pages or Workers, verifies credentials, prints safe Wrangler deployment plans, and can generate GitHub Actions workflows.
+- `project-tracking-integrator`: Discovers or establishes a multi-platform tracking system, implements data-team event contracts, and verifies source, runtime payloads, and platform ingestion.
 
 ## Skill Dependencies
 
@@ -61,6 +64,14 @@ Disable auto-update for a run:
 
 ```bash
 ACTIVITY_CMS_PSD_AUTO_UPDATE=0 ./activity-cms-psd "/path/to/activity.psd" --out "/path/to/activity-output"
+```
+
+`project-tracking-integrator` checks `Ycode-bot/dy_skills@project-tracking-integrator` at the beginning of every Skill invocation. Installed copies update atomically and continue with the latest instructions; Git working trees are never overwritten by default. Network or update failures do not block the local workflow.
+
+Disable its auto-update for one invocation:
+
+```bash
+PROJECT_TRACKING_INTEGRATOR_AUTO_UPDATE=0 codex
 ```
 
 Asset compression runs by default with Tinify. Configure the API key before generating packages:

@@ -1,134 +1,220 @@
 ---
 name: project-tracking-integrator
-description: Scan a codebase to discover one or more analytics systems, including product analytics, GA4, Google Tag Manager, Google Ads, and their centralized wrappers, event schemas, routing rules, documentation, and validation; then design or implement single-target or multi-target tracking events from product or data-team specifications while preserving project conventions. Use when asked to add tracking, 埋点, analytics, GA/GA4/GTM/Google Tag events, Sensors Analytics events, exposure/click/conversion events, convert spreadsheet or screenshot definitions into code, audit duplicate or missing events, or bootstrap analytics in a project with no established system.
+description: Discover, bootstrap, extend, implement, and verify product analytics across Sensors Analytics, GA4, Google Tag Manager, Google Ads, Segment, Mixpanel, Amplitude, and PostHog. Use when Codex needs to scan a project for an existing 埋点体系, establish the smallest coherent tracking foundation when none exists, convert a data-team spreadsheet/screenshot/document into a multi-platform event contract, create typed business tracking methods, instrument real business triggers, audit missing or duplicate events, capture browser/SDK payloads, query 神策入库数据 with read-only credentials, or produce an end-to-end tracking acceptance report.
 ---
 
 # Project Tracking Integrator
 
-Scan before designing. Treat repository instructions and existing production patterns as the source of truth. Do not assume a framework, analytics vendor, event name, or directory layout.
+Treat tracking as a lifecycle, not a single code edit:
 
-## Operating contract
+`discover → classify → contract → build/extend → instrument → verify source → verify runtime → verify ingestion → report`
 
-Return these sections unless the user requests another format:
+Do not declare completion until the required evidence layers agree. Code presence does not prove a reachable trigger, a successful request does not prove ingestion, and a same-named ingested event does not prove the property contract.
 
-1. `Scan Findings`
-2. `Implementation Plan`
-3. `Patch Draft`
-4. `Verification Checklist`
+## 0. Check for Skill updates
 
-Default to analysis and a patch draft. Modify project files only when the user explicitly asks to implement or integrate the tracking.
+At the beginning of every invocation, before scanning the target project, run this check exactly once when Python 3 is available:
 
-## Workflow
+```bash
+python3 <skill-dir>/scripts/self_update.py --dest <skill-dir>
+```
 
-### 1. Read project instructions
+Interpret the exit code as follows:
 
-Find and read applicable `AGENTS.md`, `CLAUDE.md`, repository docs, package manifests, framework configuration, lint rules, and contribution guidance. Obey the closest-scoped instructions.
+- `0`: already current, disabled, or intentionally skipped; continue normally.
+- `2`: the installed Skill changed; re-read the updated `SKILL.md` and continue this invocation with the new files without running the updater again.
+- `1`: the network or update failed; warn briefly and continue with the local version.
 
-### 2. Discover the tracking architecture
+The updater downloads `Ycode-bot/dy_skills@project-tracking-integrator` from the `main` branch, validates the remote Skill, compares a complete file-tree digest, and replaces the installed directory atomically. It preserves local runtime directories, refuses to overwrite a Git working tree by default, and treats update failure as non-blocking.
 
-Search broadly, then follow imports and call sites. Inspect at least:
+Set `PROJECT_TRACKING_INTEGRATOR_AUTO_UPDATE=0` to disable one run. Override the trusted source or branch only when explicitly requested with `PROJECT_TRACKING_INTEGRATOR_SKILL_SOURCE=owner/repo@project-tracking-integrator` or `PROJECT_TRACKING_INTEGRATOR_UPDATE_REF=<ref>`.
 
-- Dependencies and SDK initialization: `analytics`, `track`, `telemetry`, `sensors`, `segment`, `mixpanel`, `amplitude`, `gtag`, `dataLayer`, `GTM-`, `AW-`, `matomo`, `posthog`.
-- Global client/plugin/provider setup and authentication identity handling.
-- Central event transport and business wrappers such as `trackXxx`.
-- Event names, common fields, enums, page/source mapping, and user/device properties.
-- Representative call sites for clicks, exposures, submissions, success/failure states, and route changes.
-- Event catalogs, tracking maps, schemas, tests, lint scripts, and CI checks.
+## Authorization and safety
 
-Read [references/discovery.md](references/discovery.md) when performing the scan or when signals conflict.
+- Use read-only discovery and local static verification without asking for extra permission.
+- Modify application files only when the user asks to implement, integrate, fix, or complete the tracking work.
+- Query analytics platforms only with an already configured read-only credential and within the requested environment.
+- Never invent a vendor, endpoint, project, credential, event name, property, identity rule, or target route.
+- Never place secrets in source code, client-visible environment variables, CLI arguments, prompts, screenshots, or reports.
+- Keep raw queried user events out of reports; return redacted differences only.
 
-### 3. Classify the repository
+## 1. Discover the repository
 
-Classify each discovered platform independently, then classify the repository as a whole:
+Read applicable repository instructions, manifests, framework configuration, and tracking documentation. Run the deterministic scanner first when local Node.js is available:
 
-- **Established**: SDK initialization, a usable transport, and repeatable event conventions exist. Reuse them. Do not install another SDK or create a parallel tracking layer.
-- **Partial**: Some pieces exist but a required layer is missing. Extend the smallest missing layer and preserve compatibility.
-- **Absent**: No credible tracking system exists. Propose an integration before changing files. Resolve vendor credentials, environment policy, consent/privacy requirements, identity semantics, and deployment target; never invent secrets or production endpoints.
+```bash
+node <skill-dir>/scripts/scan-tracking-project.mjs \
+  --root <project-root> \
+  --format json \
+  --out /tmp/tracking-scan.json
+```
 
-Do not equate installation with event routing. A repository may contain both product analytics and GA/GTM while a specific event requires one target, both targets, or neither. Read [references/multi-platform-routing.md](references/multi-platform-routing.md) whenever more than one analytics platform exists or the requirement mentions GA, GTM, Google Ads, 神策, or dual reporting.
+Then follow the reported evidence through imports and reachable call sites. Read [references/discovery.md](references/discovery.md) for search order, conflict handling, and false-positive risks.
 
-### 4. Normalize the data requirement
+Inventory platforms independently from event routing. Detect initialization, configuration, consent, identity, common properties, vendor transport, business wrappers, calls, documentation, and validation. Static scanner output is evidence, not proof; inspect ambiguous findings manually.
 
-Accept requirements from text, tables, spreadsheets, screenshots, or documents. Convert every requested event into a contract:
+## 2. Classify before designing
 
-| Field | Meaning |
-|---|---|
-| Trigger | Exact user action or business state transition |
-| Targets | Per-platform status: `required`, `optional`, `disabled`, or `unknown` |
-| Event | Per-target transport-level event name |
-| Wrapper | Per-target project-level function name |
-| Properties | Per-target name, type, requiredness, enum, mapping, and source |
-| Timing | Before/after which operation; once or repeatable |
-| Location | Page/component/composable/service that owns the trigger |
-| Deduplication | Guard against rerender, remount, retries, or duplicate emits |
-| Validation | How to observe and verify the payload |
+Classify every platform, then the repository:
 
-Flag ambiguous spreadsheet labels instead of silently guessing. Preserve data-team field names when they are valid within the established schema.
+- `established`: initialization, usable transport or wrapper, and a reachable production call pattern exist. Reuse them.
+- `partial`: credible pieces exist but one or more required layers are missing. Add only the smallest missing layer.
+- `absent`: no credible tracking foundation exists. Resolve the target vendor, environment, consent/privacy, identity, credentials, and deployment model before implementation.
 
-Resolve `unknown` targets using explicit requirements first, then repository routing policy and analogous reachable events. If the target still cannot be established, report it as a blocking product/data decision; do not silently dual-report.
+When the user asks to implement an absent system, read [references/bootstrap-architecture.md](references/bootstrap-architecture.md) and build the smallest coherent foundation plus one representative event. Do not mass-instrument the repository before the foundation works.
 
-### 5. Validate event semantics
+When multiple platforms exist or the requirement mentions GA, GTM, Google Ads, 神策, or dual reporting, read [references/multi-platform-routing.md](references/multi-platform-routing.md). Never infer dual reporting from installed SDKs.
 
-Prefer user intent and meaningful business state transitions. Reject or reroute framework noise, DOM measurements, render side effects, performance metrics, and errors unless the project's own analytics policy explicitly includes them.
+## 3. Normalize the data requirement
 
-For exposure events, define what “shown” means: mounted, visible in viewport, fully displayed, or viewed for a duration. For async flows, distinguish submit, result, and retry. For dialogs, distinguish explicit user close from automatic dismissal.
+Transcribe text, table, CSV, spreadsheet, screenshot, or document requirements into a Version 2 contract using:
 
-Check overlap with existing events. Reuse or extend an existing wrapper when semantics match; create a new wrapper only when the behavior or schema is genuinely distinct.
+- [references/tracking-contract.schema.json](references/tracking-contract.schema.json)
+- [references/tracking-contract.example.json](references/tracking-contract.example.json)
 
-For multi-target events, keep one business trigger and map its shared context into separate platform payloads. Do not copy one vendor's schema directly into another vendor's event.
+Define for every business event:
 
-### 6. Design the patch
+- stable `id`, business meaning, exact trigger, owner, and timing
+- per-platform target state: `required`, `optional`, `disabled`, or `unknown`
+- per-target transport event, business wrapper, match selectors, property rules, and sources
+- deduplication strategy and expected count
+- runtime and ingestion evidence method
 
-For established systems:
+Preserve valid data-team names. Flag ambiguities instead of guessing. Resolve `unknown` from explicit requirements, repository routing policy, and reachable analogues; if it still changes implementation, report a blocking data/product decision.
 
-1. Add or update typed business wrappers in the existing tracking module.
-2. Reuse the centralized transport and global properties.
-3. Insert calls at the single source of truth closest to the real trigger.
-4. Keep tracking failure from breaking the business flow, following repository precedent.
-5. Update event catalogs, journey maps, schemas, tests, and indexes required by the repository.
-6. When multiple targets are required, derive shared business context once and invoke each established platform wrapper from the same semantic trigger.
+For Sensors events that share a generic name such as `ima_function_click`, always add a stable `match` discriminator such as `btn_name`.
 
-For absent systems, propose the smallest coherent architecture:
+## 4. Build or extend the implementation
 
-1. Client-only SDK initialization where applicable.
-2. Environment-specific configuration without embedded secrets.
-3. Consent and privacy handling.
-4. Anonymous identity, login association, logout reset, and common properties.
-5. A vendor-facing transport wrapper.
-6. Typed business-event wrappers.
-7. One representative integration and verification method.
+For an established or partial system:
 
-Do not mass-instrument the repository until the foundation is accepted.
+1. Reuse its SDK initialization, identity, common properties, and transport.
+2. Add or update a typed business wrapper.
+3. Insert the call at the source of truth for the user action or business state transition.
+4. Keep tracking failures from blocking the business flow, following repository precedent.
+5. Synchronize event catalogs, maps, schemas, indexes, tests, and CI checks.
 
-### 7. Verify
+For semantics:
 
-Run the narrowest relevant checks first, then repository lint/type checks when proportionate. Verify:
+- Distinguish click, submit, confirmed success, failure, and retry.
+- Define exposure as mount, viewport visibility, full display, or duration; do not leave it implicit.
+- Emit explicit-close events only from explicit close actions.
+- Guard renders, watchers, remounts, retries, callbacks, and overlapping GTM/direct tags against duplication.
+- For multiple required targets, derive shared context once and map separate vendor payloads from one business trigger.
+- Do not send raw email, phone, token, free-form content, or other personal data without an explicit approved policy.
 
-- Exact event and property names.
-- Required properties and enum values.
-- Client/SSR safety.
-- Once-only and deduplication behavior.
-- Login/logout identity behavior when affected.
-- No duplicate or unreachable event paths.
-- Exact target routing: required targets fire, optional/disabled targets do not, and no unresolved target is hidden.
-- Multi-target payloads preserve platform-specific event names, required fields, units, and deduplication identifiers.
-- A failure or absence in one analytics target does not block another target or the business action.
-- Documentation/schema/index synchronization.
-- Existing tracking validation scripts and tests.
+## 5. Verify source evidence
 
-When runtime access exists, inspect the emitted payload in SDK debug output or the browser network panel without exposing tokens or personal data.
+After implementation, enrich each required target with its expected `wrapper`, then run:
 
-## Patch rules
+```bash
+node <skill-dir>/scripts/verify-tracking-source.mjs \
+  --root <project-root> \
+  --spec <contract.json> \
+  --format json \
+  --out /tmp/tracking-source.json
+```
 
-- Follow existing naming, module boundaries, types, formatting, and comments.
-- Prefer a business wrapper over direct SDK calls at UI call sites.
-- Do not hardcode credentials, personally identifiable information, or production endpoints.
-- Do not add a dependency when an established SDK already satisfies the requirement.
-- Do not infer dual reporting merely because two SDKs are installed.
-- Do not merge vendor-specific payloads into a lowest-common-denominator schema.
-- Do not modify shared infrastructure solely to fit one event when composition is sufficient.
-- Do not claim an event is complete if its required documentation or validation contract remains stale.
+Inspect reported files. The script checks exact event/match/property literals and whether a declared wrapper has more than a definition reference. It does not perform control-flow analysis, so `PASS` still requires runtime evidence.
 
-## ImaStudio reference
+Also run the repository's narrow tests, tracking checks, lint, and type checks in proportion to the change.
 
-When the target resembles ImaStudio or uses `@joyme/sensors-data`, `KEWLSensors`, `ima_function_click`, `dataLayer`, `gtag`, `lib/track`, or `docs/tracking-map`, read [references/imastudio-pattern.md](references/imastudio-pattern.md) and [references/multi-platform-routing.md](references/multi-platform-routing.md) before proposing changes.
+## 6. Verify runtime evidence
+
+Trigger each event with a test identity and capture the actual payload using the platform's supported debug surface:
+
+- Sensors: SDK debug output or collection request.
+- GA4: DebugView, Tag Assistant, or collection request.
+- GTM: Preview mode with data-layer event, variables, triggers, and fired tags.
+- Google Ads: conversion diagnostics and stable conversion identifier.
+
+For a captured Sensors JSON/NDJSON payload, use the same contract offline:
+
+```bash
+node <skill-dir>/scripts/verify-sensors-events.mjs \
+  --spec <contract.json> \
+  --actual <captured-events.json-or-ndjson> \
+  --format json \
+  --out /tmp/tracking-runtime.json
+```
+
+For GA4, GTM, Google Ads, or another manually inspected target, record the evidence as a small JSON report that the final report generator can merge:
+
+```json
+{
+  "results": [
+    { "id": "contract-event-id", "platform": "ga4", "status": "PASS", "method": "ga4-debugview" }
+  ]
+}
+```
+
+Verify required targets independently and confirm disabled targets do not fire. Do not claim runtime success from source inspection alone.
+
+## 7. Verify Sensors ingestion
+
+When a required Sensors target must be checked for ingestion, read [references/sensors-verification.md](references/sensors-verification.md). Use the configured private Profile JSON or environment variables; never use the frontend `server_url` as a query endpoint.
+
+Preview the redacted request first:
+
+```bash
+node <skill-dir>/scripts/verify-sensors-events.mjs \
+  --spec <contract.json> \
+  --query \
+  --credentials <private-credentials.json> \
+  --profile <profile> \
+  --distinct-id <test-identity> \
+  --dry-run
+```
+
+Then run the bounded read-only query and retain only the JSON difference report:
+
+```bash
+node <skill-dir>/scripts/verify-sensors-events.mjs \
+  --spec <contract.json> \
+  --query \
+  --credentials <private-credentials.json> \
+  --profile <profile> \
+  --distinct-id <test-identity> \
+  --since-minutes 30 \
+  --format json \
+  --out /tmp/tracking-ingestion.json
+```
+
+Keep `QUERY_FAILED` distinct from `NOT_FOUND`. Check project, environment, identity, time window, ingestion delay, credential, endpoint, and permission before concluding that an event is absent.
+
+## 8. Generate the final acceptance report
+
+Combine all available evidence:
+
+```bash
+node <skill-dir>/scripts/generate-tracking-report.mjs \
+  --spec <contract.json> \
+  --scan /tmp/tracking-scan.json \
+  --source /tmp/tracking-source.json \
+  --runtime /tmp/tracking-runtime.json \
+  --ingestion /tmp/tracking-ingestion.json \
+  --out /tmp/tracking-acceptance.md
+```
+
+Interpret final states consistently:
+
+- `PASS`: all required evidence for the target passed.
+- `INCOMPLETE`: one or more evidence layers were not run.
+- `BLOCKED`: a required routing or contract decision remains unknown.
+- `MISSING_IMPLEMENTATION` / `UNREACHABLE`: static implementation is absent or not credibly called.
+- `NOT_SENT`: runtime payload was not observed.
+- `NOT_FOUND`: the query succeeded but no matching ingested event was found.
+- `COUNT_MISMATCH` / `DUPLICATED` / `CONTRACT_MISMATCH`: count or schema differs.
+- `QUERY_FAILED`: endpoint, credential, permission, timeout, or API execution failed.
+
+## Delivery format
+
+Return or create these artifacts when the scope permits:
+
+1. `Scan Findings`: platforms, classification, evidence, risks, and missing foundation.
+2. `Tracking Contract`: normalized Version 2 JSON and unresolved decisions.
+3. `Implementation`: changed wrappers, call sites, infrastructure, documentation, and tests.
+4. `Verification Evidence`: source, runtime, and ingestion results kept separate.
+5. `Acceptance Report`: per-event and per-platform matrix with remaining actions.
+
+For ImaStudio, `@joyme/sensors-data`, `KEWLSensors`, `ima_function_click`, `dataLayer`, `lib/track`, or `docs/tracking-map`, read [references/imastudio-pattern.md](references/imastudio-pattern.md) before modifying or validating the project.

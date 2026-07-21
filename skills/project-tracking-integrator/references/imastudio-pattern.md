@@ -90,3 +90,39 @@ For Google-targeted events, also verify the exact `dataLayer` payload or `gtag` 
 - Existing tracking-map validation passes.
 - Event routing states which targets are required and why.
 - GA/GTM payloads use their own event contracts rather than Sensors field names.
+
+## Sensors ingestion verification
+
+ImaStudio's client configuration uses a Sensors `server_url` ending in `/sa?project=AiProduct`. Treat it only as the ingestion endpoint. Do not derive `/api/sql/query`, API_SECRET, or query permissions from it.
+
+For post-release QA, read [sensors-verification.md](sensors-verification.md), normalize the relevant tracking-map row into a contract, and run `scripts/verify-sensors-events.mjs`. Because most business actions share `ima_function_click`, set `match.btn_name` for every contract. Add another stable selector only when the data requirement needs it.
+
+Example for `trackDiscountOfferClaim`:
+
+```json
+{
+  "version": 2,
+  "events": [
+    {
+      "id": "discount-popup-claim-click",
+      "trigger": "用户点击可用的优惠弹窗领取按钮",
+      "deduplication": { "minCount": 1, "maxCount": 1 },
+      "targets": {
+        "sensors": {
+          "status": "required",
+          "event": "ima_function_click",
+          "wrapper": "trackDiscountOfferClaim",
+          "match": { "btn_name": "discount_popup_claim_click" },
+          "properties": {
+            "f_page": { "type": "string", "equals": "community" },
+            "btn_position": { "type": "string", "oneOf": ["ai-creation", "canvas-editor"] },
+            "btn_name": { "type": "string", "equals": "discount_popup_claim_click" }
+          }
+        }
+      }
+    }
+  ]
+}
+```
+
+Filter live verification with a test `distinct_id`, a short time window, and the test environment's confirmed Sensors query project. Update the tracking-map status only after the query succeeds and the returned event satisfies the contract. Record query failure separately from zero matching events.

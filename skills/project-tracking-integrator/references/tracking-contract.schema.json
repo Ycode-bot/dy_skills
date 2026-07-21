@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/project-tracking-integrator/tracking-contract.schema.json",
+  "title": "Multi-platform tracking contract",
+  "type": "object",
+  "required": ["version", "events"],
+  "properties": {
+    "version": {
+      "const": 2
+    },
+    "defaults": {
+      "$ref": "#/$defs/countWindow"
+    },
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/businessEvent"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "countWindow": {
+      "type": "object",
+      "properties": {
+        "sinceMinutes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "minCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxCount": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "businessEvent": {
+      "type": "object",
+      "required": ["id", "trigger", "targets"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "businessEvent": {
+          "type": "string"
+        },
+        "trigger": {
+          "type": "string",
+          "minLength": 1
+        },
+        "owner": {
+          "type": "object",
+          "properties": {
+            "page": { "type": "string" },
+            "component": { "type": "string" },
+            "service": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "timing": {
+          "type": "string"
+        },
+        "deduplication": {
+          "type": "object",
+          "properties": {
+            "strategy": { "type": "string" },
+            "key": { "type": "string" },
+            "minCount": { "type": "integer", "minimum": 0 },
+            "maxCount": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "targets": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "enum": ["sensors", "ga4", "gtm", "google_ads"]
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "validation": {
+          "type": "object",
+          "properties": {
+            "testIdentityRequired": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "target": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "enum": ["required", "optional", "disabled", "unknown"]
+        },
+        "event": { "type": "string" },
+        "wrapper": { "type": "string" },
+        "distinctId": { "type": "string" },
+        "sinceMinutes": { "type": "integer", "minimum": 1 },
+        "minCount": { "type": "integer", "minimum": 0 },
+        "maxCount": { "type": "integer", "minimum": 0 },
+        "match": {
+          "type": "object",
+          "additionalProperties": {
+            "type": ["string", "number", "boolean"]
+          }
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/propertyRule"
+          }
+        },
+        "validation": {
+          "type": "object",
+          "properties": {
+            "runtimeEvidence": { "type": "string" },
+            "ingestionEvidence": { "type": "string" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": { "const": "required" }
+            }
+          },
+          "then": {
+            "required": ["event"]
+          }
+        }
+      ]
+    },
+    "propertyRule": {
+      "type": "object",
+      "properties": {
+        "required": { "type": "boolean" },
+        "type": {
+          "enum": ["string", "number", "integer", "boolean", "array", "object"]
+        },
+        "equals": true,
+        "oneOf": {
+          "type": "array"
+        },
+        "pattern": {
+          "type": "string",
+          "format": "regex"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
