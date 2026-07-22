@@ -74,7 +74,7 @@ When both code and data language appear, prefer `verify-data` if the requested c
 5. If the API request fails, return `QUERY_FAILED`; if it succeeds with no rows, return `NOT_FOUND`.
 6. Return `PASS`, `NOT_FOUND`, `COUNT_MISMATCH`, `DUPLICATED`, `CONTRACT_MISMATCH`, `BLOCKED`, or `QUERY_FAILED` for every requested event. A prose code review is not a valid result.
 7. When one analytics project contains multiple deployment environments, require an environment filter before querying. Never mix local, QA, and production rows in one acceptance conclusion.
-8. Treat event, environment, time window, and stable match fields as query selectors only. Compare only fields and count rules declared by the data requirement; ignore additional platform-returned fields.
+8. Query the platform by event, environment, and time window. Apply stable `match` fields locally to associate same-name business actions, then strictly compare only the properties and count rules declared by the data requirement; ignore additional platform-returned fields.
 
 ### Narrow-mode examples
 
@@ -83,7 +83,7 @@ When both code and data language appear, prefer `verify-data` if the requested c
 - `$project-tracking-integrator 根据这份文档生成对应的埋点方法` → `generate-method`: locate the existing transport and nearest wrapper pattern, add the method, run a narrow static check, and stop. Do not add business call sites or query Sensors.
 - `$project-tracking-integrator 给支付成功流程加埋点` → `instrument`: implement the requested wrapper and call site, run source checks, and stop before live data verification.
 - `$project-tracking-integrator 在 QA 自动点击领取按钮并验证神策数据` → `browser-verify`: execute only the supplied browser journey, verify its visible outcome, query QA ingestion, compare the contract, and stop. Do not scan or modify the repository.
-- `$project-tracking-integrator 在本地 localhost:3000 自动点击领取按钮并验证神策数据` → `browser-verify`: derive `localhost:3000` from the browser URL, query by environment, event, stable match fields, and the trigger time window, compare the contract, and stop.
+- `$project-tracking-integrator 在本地 localhost:3000 自动点击领取按钮并验证神策数据` → `browser-verify`: derive `localhost:3000` from the browser URL, query candidates by environment, event, and the trigger time window, associate them with stable match fields locally, compare the contract, and stop.
 - `$project-tracking-integrator 完成埋点后用浏览器跑一遍并验收` → compose `instrument → browser-verify`: implement first, then run only the agreed QA journey and ingestion comparison. Do not append unrelated platform audits.
 - `$project-tracking-integrator 完整接入这些事件并验证神策入库` → `full-lifecycle`: run the relevant end-to-end stages.
 
@@ -221,7 +221,7 @@ The minimum acceptance loop is:
 2. Reuse the signed-in in-app browser session. Inspect the live DOM and validate one unique locator immediately before each action; never guess selectors from source code or screenshots.
 3. Wait for a stable route and interactive application state, record the start time, execute only the authorized steps, and verify the visible UI result after every trigger.
 4. Read redacted SDK console output when the application exposes it. Treat this as optional runtime evidence because browser automation may execute JavaScript in an isolated world and the in-app browser does not expose general Network request interception.
-5. After a bounded ingestion wait, query the analytics API with the same event contract, environment value, trigger time window, and stable match fields.
+5. After a bounded ingestion wait, query candidate rows with the event name, environment value, and trigger time window; apply stable match fields locally before strict contract comparison.
 6. Compare event name, properties, values, types, and expected count. If the first query returns `NOT_FOUND`, permit at most one delayed re-query before concluding.
 
 The platform query is mandatory in this mode. A successful click, UI transition, or console message does not prove ingestion. Conversely, do not claim that an outgoing request was captured unless an actual SDK log or captured payload was observed.
@@ -236,8 +236,8 @@ In `verify-data` and the ingestion portion of `browser-verify`, do not begin wit
 
 1. Transcribe only the requested events, match selectors, properties, expected values, and count constraints from the supplied screenshot/document into a temporary contract.
 2. Use the specified platform and configured read-only credential. Do not infer additional targets.
-3. Query the shortest practical time window with the event name, environment, and stable match fields.
-4. Compare expected and actual event name, fields, types, values, enums, and counts.
+3. Query candidate rows in the shortest practical time window using only the event name and environment.
+4. Associate same-name candidates locally with stable `match` fields, then strictly compare expected and actual fields, types, values, enums, and counts.
 5. Return a compact per-event result table plus any query limitation, then stop.
 
 Resolve Sensors query configuration in this order without printing secrets:
@@ -256,7 +256,7 @@ When the same Sensors project receives more than one application environment, ad
 | QA acceptance before release | `lmweb_url` contains `qa.imastudio.com` | `--environment qa --environment-value qa.imastudio.com` |
 | Production smoke check after release | `lmweb_url` contains `www.imastudio.com` | `--environment production --environment-value www.imastudio.com` |
 
-Use the environment value without protocol or path. Derive local values from `new URL(startUrl).host`, preserving the port. The default property is `lmweb_url`; override it only when the repository/data team confirms another common field with `--environment-property <name>`. Keep the environment filter together with event, stable action match, and a time window covering the browser trigger. These selectors locate the intended rows; they do not add validation requirements beyond the data contract.
+Use the environment value without protocol or path. Derive local values from `new URL(startUrl).host`, preserving the port. The default property is `lmweb_url`; override it only when the repository/data team confirms another common field with `--environment-property <name>`. The live SQL uses environment, event, and a time window covering the browser trigger. Stable action `match` fields are applied to the returned candidates locally so a platform-side column type mismatch becomes a contract result instead of a SQL failure. Any match field whose type or value must be accepted must also appear in `properties`.
 
 If the query would be too broad because a generic event lacks a stable selector such as `btn_name` or `page`, ask only for that minimum business filter. Do not compensate by auditing wrappers, Tracking Maps, GA/GTM, or unrelated events.
 

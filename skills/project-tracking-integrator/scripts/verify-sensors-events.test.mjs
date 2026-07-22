@@ -164,6 +164,22 @@ test('parseOpenApiRows maps streamed columns and values into event rows', () => 
     }]);
 });
 
+test('parseOpenApiRows exposes a safe OpenAPI error code and message', () => {
+    assert.throws(
+        () => parseOpenApiRows(JSON.stringify({
+            code: 'SA-R-33-2',
+            message: '查询引擎 SQL 执行错误',
+            error_info: 'internal diagnostics that must not be copied',
+        })),
+        error => {
+            assert.match(error.message, /SA-R-33-2/);
+            assert.match(error.message, /查询引擎 SQL 执行错误/);
+            assert.doesNotMatch(error.message, /internal diagnostics/);
+            return true;
+        },
+    );
+});
+
 test('compareContract passes matching flat query rows', () => {
     const report = compareContract(contract, [{
         event: 'ima_function_click',
@@ -204,6 +220,27 @@ test('compareContract reports duplicates', () => {
     assert.equal(report.results[0].status, 'DUPLICATED');
 });
 
+test('duplicate candidates retain contract mismatch evidence when none pass', () => {
+    const duplicateContract = normalizeContract({
+        events: [{
+            event: 'ImaWebStream',
+            match: { action_type: 2 },
+            maxCount: 1,
+            properties: { action_type: { type: 'number', equals: 2 } },
+        }],
+    });
+    const report = compareContract(duplicateContract, [
+        { event: 'ImaWebStream', action_type: '2' },
+        { event: 'ImaWebStream', action_type: '2' },
+    ]);
+
+    assert.equal(report.results[0].status, 'DUPLICATED');
+    assert.deepEqual(
+        report.results[0].issues.map(issue => issue.code),
+        ['COUNT_EXCEEDED', 'TYPE_MISMATCH'],
+    );
+});
+
 test('match separates business actions that share one Sensors event name', () => {
     const sharedEventContract = normalizeContract({
         events: [
@@ -228,6 +265,36 @@ test('match separates business actions that share one Sensors event name', () =>
     assert.equal(report.summary.passed, 2);
 });
 
+test('match associates type-equivalent candidates before strict contract validation', () => {
+    const typeContract = normalizeContract({
+        events: [{
+            id: 'material-click',
+            event: 'ImaWebStream',
+            match: { page_content_no: '2', action_type: 2 },
+            properties: {
+                page_content_no: { type: 'string', equals: '2' },
+                action_type: { type: 'number', equals: 2 },
+            },
+        }],
+    });
+    const report = compareContract(typeContract, [{
+        event: 'ImaWebStream',
+        page_content_no: 2,
+        action_type: '2',
+    }]);
+
+    assert.equal(report.results[0].status, 'CONTRACT_MISMATCH');
+    assert.equal(report.results[0].candidateCount, 1);
+    assert.equal(report.results[0].issues.length, 2);
+    assert.deepEqual(
+        report.results[0].issues.map(issue => [issue.property, issue.code]),
+        [
+            ['page_content_no', 'TYPE_MISMATCH'],
+            ['action_type', 'TYPE_MISMATCH'],
+        ],
+    );
+});
+
 test('buildSensorsSql escapes literals and keeps a bounded query', () => {
     const sql = buildSensorsSql({
         event: "event'quoted",
@@ -238,7 +305,7 @@ test('buildSensorsSql escapes literals and keeps a bounded query', () => {
         limit: 50,
     });
     assert.match(sql, /event = 'event''quoted'/);
-    assert.match(sql, /`btn_name` = 'dialog_click'/);
+    assert.doesNotMatch(sql, /btn_name/);
     assert.match(sql, /time >= '/);
     assert.match(sql, /LIMIT 50$/);
 });
@@ -410,6 +477,7 @@ test('live query compares API rows with only the declared contract fields', asyn
         globalThis.fetch = async (_url, init) => {
             const sql = String(init.body);
             assert.match(sql, /localhost%3A3001|localhost:3001/);
+            assert.doesNotMatch(sql, /btn_name/);
             assert.doesNotMatch(sql, /distinct_id\s*%3D|distinct_id\s*=/);
             return new Response(JSON.stringify({
                 event: 'ima_function_click',
@@ -434,6 +502,70 @@ test('live query compares API rows with only the declared contract fields', asyn
         const report = JSON.parse(output);
         assert.equal(report.results[0].status, 'PASS');
         assert.doesNotMatch(output, /platform-generated-value/);
+    }
+    finally {
+        globalThis.fetch = originalFetch;
+        await fs.rm(temporary, { recursive: true, force: true });
+    }
+});
+
+test('live query reuses one candidate request for contracts sharing an event', async () => {
+    const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'sensors-shared-event-query-test-'));
+    const originalFetch = globalThis.fetch;
+    let fetchCount = 0;
+    try {
+        const spec = path.join(temporary, 'contract.json');
+        const credentials = path.join(temporary, 'credentials.json');
+        const out = path.join(temporary, 'report.json');
+        await fs.writeFile(spec, JSON.stringify({
+            events: [
+                {
+                    id: 'show',
+                    event: 'ima_function_click',
+                    match: { btn_name: 'dialog_show' },
+                    properties: { btn_name: { type: 'string', equals: 'dialog_show' } },
+                },
+                {
+                    id: 'click',
+                    event: 'ima_function_click',
+                    match: { btn_name: 'dialog_click' },
+                    properties: { btn_name: { type: 'string', equals: 'dialog_click' } },
+                },
+            ],
+        }), 'utf8');
+        await fs.writeFile(credentials, JSON.stringify({
+            default_profile: 'test',
+            profiles: {
+                test: {
+                    hosts: ['https://sensor.internal'],
+                    project: 'AiProduct',
+                    api_key: 'private-token-12345',
+                },
+            },
+        }), { mode: 0o600 });
+        await fs.chmod(credentials, 0o600);
+        globalThis.fetch = async (_url, init) => {
+            fetchCount += 1;
+            assert.doesNotMatch(String(init.body), /btn_name/);
+            return new Response(JSON.stringify({
+                events: [
+                    { event: 'ima_function_click', btn_name: 'dialog_show' },
+                    { event: 'ima_function_click', btn_name: 'dialog_click' },
+                ],
+            }), { status: 200 });
+        };
+
+        const code = await run([
+            '--spec', spec,
+            '--query',
+            '--credentials', credentials,
+            '--format', 'json',
+            '--out', out,
+        ]);
+        assert.equal(code, 0);
+        assert.equal(fetchCount, 1);
+        const report = JSON.parse(await fs.readFile(out, 'utf8'));
+        assert.equal(report.summary.passed, 2);
     }
     finally {
         globalThis.fetch = originalFetch;

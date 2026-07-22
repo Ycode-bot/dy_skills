@@ -580,6 +580,7 @@ function inspectEvent(row, expected) {
                 message: `类型应为 ${rule.type}，实际为 ${valueType(value)}`,
                 actual: redactValue(name, value),
             });
+            continue;
         }
         if (Object.prototype.hasOwnProperty.call(rule, 'equals') && !isDeepStrictEqual(value, rule.equals)) {
             issues.push({
@@ -611,16 +612,35 @@ function inspectEvent(row, expected) {
     return issues;
 }
 
+function selectorEquivalent(actual, expected) {
+    if (isDeepStrictEqual(actual, expected)) {
+        return true;
+    }
+    if (actual === null || actual === undefined || expected === null || expected === undefined) {
+        return false;
+    }
+    const isPrimitiveSelector = value => ['string', 'number', 'boolean'].includes(typeof value);
+    return isPrimitiveSelector(actual)
+        && isPrimitiveSelector(expected)
+        && String(actual) === String(expected);
+}
+
 function compareContract(contract, rows) {
     const results = contract.events.map(expected => {
         const candidates = rows.filter(row => {
             if (getEventName(row) !== expected.event) {
                 return false;
             }
-            return Object.entries(expected.match).every(([name, value]) => isDeepStrictEqual(getProperty(row, name), value));
+            return Object.entries(expected.match).every(([name, value]) => selectorEquivalent(getProperty(row, name), value));
         });
         const inspected = candidates.map(row => inspectEvent(row, expected));
         const passingCount = inspected.filter(issues => issues.length === 0).length;
+        const contractIssues = [...new Map(
+            inspected.flat().map(issue => [
+                JSON.stringify([issue.property, issue.code, issue.message]),
+                issue,
+            ]),
+        ).values()];
         let status = 'PASS';
         const issues = [];
 
@@ -644,7 +664,10 @@ function compareContract(contract, rows) {
         }
         else if (passingCount === 0) {
             status = 'CONTRACT_MISMATCH';
-            issues.push(...(inspected[0] || []));
+        }
+
+        if (candidates.length > 0 && passingCount === 0) {
+            issues.push(...contractIssues);
         }
 
         return {
@@ -691,22 +714,9 @@ function formatLocalDateTime(date) {
 
 function quoteSqlIdentifier(name) {
     if (!/^\$?[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
-        fail(`unsupported Sensors property name in match: ${name}`);
+        fail(`unsupported Sensors property name: ${name}`);
     }
     return `\`${name.replaceAll('`', '``')}\``;
-}
-
-function formatSqlValue(value) {
-    if (typeof value === 'string') {
-        return `'${escapeSqlLiteral(value)}'`;
-    }
-    if (typeof value === 'number' && Number.isFinite(value)) {
-        return String(value);
-    }
-    if (typeof value === 'boolean') {
-        return value ? 'TRUE' : 'FALSE';
-    }
-    fail('match values must be strings, finite numbers, or booleans');
 }
 
 function buildSensorsSql(expected, options = {}) {
@@ -721,9 +731,6 @@ function buildSensorsSql(expected, options = {}) {
         `time >= '${formatLocalDateTime(from)}'`,
         `event = '${escapeSqlLiteral(expected.event)}'`,
     ];
-    for (const [name, value] of Object.entries(expected.match || {})) {
-        conditions.push(`${quoteSqlIdentifier(name)} = ${formatSqlValue(value)}`);
-    }
     const environmentValue = options.environmentValue || options.environmentHost;
     if (environmentValue) {
         conditions.push(`${quoteSqlIdentifier(options.environmentProperty || 'lmweb_url')} LIKE '%${escapeSqlLiteral(environmentValue)}%'`);
@@ -777,7 +784,15 @@ function parseOpenApiRows(text) {
     const rows = [];
     for (const payload of payloads) {
         if (payload?.code && payload.code !== 'SUCCESS') {
-            throw new Error('Sensors OpenAPI returned an error payload; check SQL, project, API Key permissions, and product version');
+            const code = String(payload.code).slice(0, 80);
+            const detail = payload.message
+                || payload.msg
+                || payload.error_message
+                || payload.error?.message;
+            const suffix = typeof detail === 'string' && detail.trim()
+                ? `: ${detail.trim().slice(0, 240)}`
+                : '';
+            throw new Error(`Sensors OpenAPI ${code}${suffix}`);
         }
         if (getEventName(payload)) {
             rows.push(payload);
@@ -871,7 +886,6 @@ async function queryAllEvents(contract, options, env = process.env) {
         const cacheKey = JSON.stringify({
             event: expected.event,
             sinceMinutes: options.sinceMinutes ?? expected.sinceMinutes,
-            match: expected.match,
             environment: options.environment,
             environmentValue: options.environmentValue || options.environmentHost,
             environmentProperty: options.environmentProperty,

@@ -5,7 +5,7 @@
 `browser-verify` 用于用户明确要求“让浏览器执行测试步骤并验证埋点”的场景。它连接两类证据：
 
 1. 浏览器确实完成了指定业务操作，页面出现了预期结果。
-2. 分析平台查询到了与同一契约、环境、稳定字段和触发时间匹配的入库事件。
+2. 分析平台按同一事件、环境和触发时间返回候选数据，本地稳定字段关联后的入库事件满足契约。
 
 这个模式不自动扫描仓库、不修改源码，也不补做 GA/GTM 等无关平台审计。若用户同时要求实现和自动验收，按 `instrument → browser-verify` 组合执行。
 
@@ -17,7 +17,7 @@
 - local、QA 或 production 环境名和起始 URL。
 - 可安全执行的浏览器步骤和每一步的可见预期结果。
 - 环境过滤值，例如 `localhost:3000` 或 `qa.imastudio.com`，不含协议和路径。
-- 精确事件名、稳定 match 字段和覆盖浏览器触发时刻的短时间窗。
+- 精确事件名、环境和覆盖浏览器触发时刻的短时间窗；稳定 match 字段用于本地候选关联。
 - 已登录的测试会话；登录、OTP、验证码或 Passkey 由用户完成。
 
 对购买、支付、发布、删除、发消息、提交订单、修改线上数据等有明显外部副作用的动作，在执行前确认本次动作已获用户明确授权。优先使用 QA、沙箱和测试账号。
@@ -105,7 +105,7 @@ in-app Browser 可以执行 UI 操作、读取 DOM、确认页面结果并读取
 
 查询平台。环境值不能包含协议或路径。ImaStudio 使用：local `lmweb_url LIKE '%localhost:端口%'`、QA `LIKE '%qa.imastudio.com%'`、production `LIKE '%www.imastudio.com%'`。
 
-环境、精确事件名、稳定 match 和触发时间窗只负责定位本次旅程产生的数据。平台返回但埋点契约没有声明的字段不参与验收；契约声明的字段统一按普通属性规则比较。
+环境、精确事件名和触发时间窗负责从平台获取本次旅程的候选数据；稳定 match 在本地关联同名业务动作。平台返回但埋点契约没有声明的字段不参与验收；契约声明的字段统一按普通属性规则严格比较。
 
 完成操作后等待一个有界的入库延迟再查询。第一次为 `NOT_FOUND` 时至多延迟重查一次；不要高频轮询神策。第二次仍无数据则保持 `NOT_FOUND`，并报告环境、时间窗和 match 条件，不转去做源码审计。
 
@@ -133,6 +133,6 @@ in-app Browser 可以执行 UI 操作、读取 DOM、确认页面结果并读取
 |---|---|---|
 | 浏览器步骤 | `PASS` / `BLOCKED` / `FAILED` | 环境名、URL、控件语义和可见结果，不附敏感页面内容 |
 | SDK 发送日志 | `PASS` / `NOT_AVAILABLE` / `NOT_SENT` / `CONTRACT_MISMATCH` | 全局对象不可见为 `NOT_AVAILABLE`；只有真实捕获面存在但缺少事件才是 `NOT_SENT` |
-| 平台入库 | `PASS` / `NOT_FOUND` / `COUNT_MISMATCH` / `DUPLICATED` / `CONTRACT_MISMATCH` / `QUERY_FAILED` | 按环境、事件、稳定 match 和触发时间查询，再与契约字段和次数比较 |
+| 平台入库 | `PASS` / `NOT_FOUND` / `COUNT_MISMATCH` / `DUPLICATED` / `CONTRACT_MISMATCH` / `QUERY_FAILED` | 按环境、事件和触发时间查询候选，本地应用稳定 match，再与契约字段和次数比较 |
 
 只有浏览器旅程达到预期且平台入库契约通过时，`browser-verify` 才能返回最终 `PASS`。控制台日志未提供时可标记 `NOT_AVAILABLE`，但不能因此跳过平台查询。

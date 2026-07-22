@@ -127,6 +127,6 @@ Example for `trackDiscountOfferClaim`:
 }
 ```
 
-Filter live verification with the event name, stable match fields, a short time window, and the test environment's confirmed Sensors query project. Treat those values as query selectors, then compare only the fields and counts declared by the tracking contract. Update the tracking-map status only after the query succeeds and the returned event satisfies the contract. Record query failure separately from zero matching events.
+Fetch live candidates with the event name, a short time window, and the test environment's confirmed Sensors query project. Apply stable match fields locally to associate same-name business actions, then strictly compare only the fields and counts declared by the tracking contract. This keeps a Sensors column-type mismatch visible as `CONTRACT_MISMATCH` instead of turning it into SQL failure. Update the tracking-map status only after the query succeeds and the returned event satisfies the contract. Record query failure separately from zero matching events.
 
 Because ImaStudio local, QA, and production currently share the same Sensors project, every live verification query must also filter the common URL property. Use the actual browser host such as `localhost:3000` for local, `qa.imastudio.com` before release, and `www.imastudio.com` for the post-release smoke check. Query values never include protocol or path. The verifier maps this to `lmweb_url LIKE '%<host-or-host:port>%'`. Do not combine environments in one count.
