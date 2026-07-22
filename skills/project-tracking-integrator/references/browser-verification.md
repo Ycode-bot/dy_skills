@@ -105,7 +105,7 @@ in-app Browser 可以执行 UI 操作、读取 DOM、确认页面结果并读取
 
 查询平台。环境值不能包含协议或路径。ImaStudio 使用：local `lmweb_url LIKE '%localhost:端口%'`、QA `LIKE '%qa.imastudio.com%'`、production `LIKE '%www.imastudio.com%'`。
 
-不要为了验收提前获取、发现或强制匹配 `distinct_id`。神策会为游客和登录用户的事件写入该字段，但浏览器验收默认按环境、精确事件名、稳定 match 和触发时间窗定位数据。只有用户明确要求核对某个已知身份时，才额外传 `--distinct-id`。不要读取 Cookie、localStorage 或浏览器凭证来恢复身份。
+环境、精确事件名、稳定 match 和触发时间窗只负责定位本次旅程产生的数据。平台返回但埋点契约没有声明的字段不参与验收；契约声明的字段统一按普通属性规则比较。
 
 完成操作后等待一个有界的入库延迟再查询。第一次为 `NOT_FOUND` 时至多延迟重查一次；不要高频轮询神策。第二次仍无数据则保持 `NOT_FOUND`，并报告环境、时间窗和 match 条件，不转去做源码审计。
 
@@ -133,6 +133,6 @@ in-app Browser 可以执行 UI 操作、读取 DOM、确认页面结果并读取
 |---|---|---|
 | 浏览器步骤 | `PASS` / `BLOCKED` / `FAILED` | 环境名、URL、控件语义和可见结果，不附敏感页面内容 |
 | SDK 发送日志 | `PASS` / `NOT_AVAILABLE` / `NOT_SENT` / `CONTRACT_MISMATCH` | 全局对象不可见为 `NOT_AVAILABLE`；只有真实捕获面存在但缺少事件才是 `NOT_SENT` |
-| 平台入库 | `PASS` / `NOT_FOUND` / `COUNT_MISMATCH` / `DUPLICATED` / `CONTRACT_MISMATCH` / `QUERY_FAILED` | 按环境、事件、稳定 match 和触发时间查询；不强制身份过滤 |
+| 平台入库 | `PASS` / `NOT_FOUND` / `COUNT_MISMATCH` / `DUPLICATED` / `CONTRACT_MISMATCH` / `QUERY_FAILED` | 按环境、事件、稳定 match 和触发时间查询，再与契约字段和次数比较 |
 
 只有浏览器旅程达到预期且平台入库契约通过时，`browser-verify` 才能返回最终 `PASS`。控制台日志未提供时可标记 `NOT_AVAILABLE`，但不能因此跳过平台查询。

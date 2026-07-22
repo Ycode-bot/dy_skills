@@ -180,7 +180,6 @@
         },
         "event": { "type": "string" },
         "wrapper": { "type": "string" },
-        "distinctId": { "type": "string" },
         "sinceMinutes": { "type": "integer", "minimum": 1 },
         "minCount": { "type": "integer", "minimum": 0 },
         "maxCount": { "type": "integer", "minimum": 0 },

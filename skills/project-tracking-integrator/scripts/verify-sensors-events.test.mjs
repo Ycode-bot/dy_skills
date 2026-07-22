@@ -231,7 +231,6 @@ test('match separates business actions that share one Sensors event name', () =>
 test('buildSensorsSql escapes literals and keeps a bounded query', () => {
     const sql = buildSensorsSql({
         event: "event'quoted",
-        distinctId: "user'quoted",
         sinceMinutes: 30,
         match: { btn_name: 'dialog_click' },
     }, {
@@ -239,7 +238,6 @@ test('buildSensorsSql escapes literals and keeps a bounded query', () => {
         limit: 50,
     });
     assert.match(sql, /event = 'event''quoted'/);
-    assert.match(sql, /distinct_id = 'user''quoted'/);
     assert.match(sql, /`btn_name` = 'dialog_click'/);
     assert.match(sql, /time >= '/);
     assert.match(sql, /LIMIT 50$/);
@@ -313,7 +311,7 @@ test('dry-run prints the environment isolation condition', () => {
     assert.match(output, /`lmweb_url` LIKE '%qa\.imastudio\.com%'/);
 });
 
-test('local environment dry-run does not require a distinct_id', async () => {
+test('local environment dry-run uses only contract query selectors', async () => {
     const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'sensors-local-environment-test-'));
     try {
         const spec = path.join(temporary, 'contract.json');
@@ -366,8 +364,8 @@ test('local environment dry-run does not require a distinct_id', async () => {
     }
 });
 
-test('live query accepts anonymous Sensors rows without filtering or validating distinct_id', async () => {
-    const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'sensors-anonymous-query-test-'));
+test('live query compares API rows with only the declared contract fields', async () => {
+    const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'sensors-contract-query-test-'));
     const originalFetch = globalThis.fetch;
     try {
         const spec = path.join(temporary, 'contract.json');
@@ -415,7 +413,7 @@ test('live query accepts anonymous Sensors rows without filtering or validating 
             assert.doesNotMatch(sql, /distinct_id\s*%3D|distinct_id\s*=/);
             return new Response(JSON.stringify({
                 event: 'ima_function_click',
-                distinct_id: 'anonymous-local-user-123',
+                distinct_id: 'platform-generated-value',
                 lmweb_url: 'http://localhost:3001/zh/community',
                 f_page: 'community',
                 btn_name: 'material_click',
@@ -435,13 +433,23 @@ test('live query accepts anonymous Sensors rows without filtering or validating 
         const output = await fs.readFile(out, 'utf8');
         const report = JSON.parse(output);
         assert.equal(report.results[0].status, 'PASS');
-        assert.equal(report.identity, undefined);
-        assert.doesNotMatch(output, /anonymous-local-user-123/);
+        assert.doesNotMatch(output, /platform-generated-value/);
     }
     finally {
         globalThis.fetch = originalFetch;
         await fs.rm(temporary, { recursive: true, force: true });
     }
+});
+
+test('dedicated identity query options are not part of data verification', async () => {
+    await assert.rejects(
+        () => run([
+            '--spec', '/missing/contract.json',
+            '--actual', '/missing/events.json',
+            '--distinct-id', 'test-value',
+        ]),
+        /unknown option: --distinct-id/,
+    );
 });
 
 test('querySensorsEvent calls SQL API and parses NDJSON without exposing credential', async () => {

@@ -74,6 +74,7 @@ When both code and data language appear, prefer `verify-data` if the requested c
 5. If the API request fails, return `QUERY_FAILED`; if it succeeds with no rows, return `NOT_FOUND`.
 6. Return `PASS`, `NOT_FOUND`, `COUNT_MISMATCH`, `DUPLICATED`, `CONTRACT_MISMATCH`, `BLOCKED`, or `QUERY_FAILED` for every requested event. A prose code review is not a valid result.
 7. When one analytics project contains multiple deployment environments, require an environment filter before querying. Never mix local, QA, and production rows in one acceptance conclusion.
+8. Treat event, environment, time window, and stable match fields as query selectors only. Compare only fields and count rules declared by the data requirement; ignore additional platform-returned fields.
 
 ### Narrow-mode examples
 
@@ -220,14 +221,14 @@ The minimum acceptance loop is:
 2. Reuse the signed-in in-app browser session. Inspect the live DOM and validate one unique locator immediately before each action; never guess selectors from source code or screenshots.
 3. Wait for a stable route and interactive application state, record the start time, execute only the authorized steps, and verify the visible UI result after every trigger.
 4. Read redacted SDK console output when the application exposes it. Treat this as optional runtime evidence because browser automation may execute JavaScript in an isolated world and the in-app browser does not expose general Network request interception.
-5. After a bounded ingestion wait, query the analytics API with the same event contract, environment value, trigger time window, and stable match fields. Do not require a caller-supplied `distinct_id`; Sensors assigns one to anonymous and logged-in events.
+5. After a bounded ingestion wait, query the analytics API with the same event contract, environment value, trigger time window, and stable match fields.
 6. Compare event name, properties, values, types, and expected count. If the first query returns `NOT_FOUND`, permit at most one delayed re-query before concluding.
 
 The platform query is mandatory in this mode. A successful click, UI transition, or console message does not prove ingestion. Conversely, do not claim that an outgoing request was captured unless an actual SDK log or captured payload was observed.
 
 Never use `window.<sdk> === undefined` as proof that initialization or sending failed. First confirm the page route is stable and the application is interactive; then check the SDK only in the page's main execution world when the Browser surface supports it. An isolated-world or unavailable global handle is `NOT_AVAILABLE`, not `NOT_SENT`, and must not skip the platform query. Use `NOT_SENT` only when an actual captured request/debug payload proves the expected event was absent.
 
-Return `BLOCKED` with only the missing input when the start URL, safe test journey, environment filter, contract, authentication state, or sufficiently narrow event/match filter is unavailable. A missing SDK global or caller-supplied `distinct_id` is not a blocker. Hand CAPTCHA, OTP, passkeys, and account login to the user; never inspect cookies or browser storage to recover credentials.
+Return `BLOCKED` with only the missing input when the start URL, safe test journey, environment filter, contract, authentication state, or sufficiently narrow event/match filter is unavailable. A missing SDK global is not a blocker. Hand CAPTCHA, OTP, passkeys, and account login to the user; never inspect cookies or browser storage to recover credentials.
 
 ## Capability: Verify platform ingestion
 
@@ -255,7 +256,7 @@ When the same Sensors project receives more than one application environment, ad
 | QA acceptance before release | `lmweb_url` contains `qa.imastudio.com` | `--environment qa --environment-value qa.imastudio.com` |
 | Production smoke check after release | `lmweb_url` contains `www.imastudio.com` | `--environment production --environment-value www.imastudio.com` |
 
-Use the environment value without protocol or path. Derive local values from `new URL(startUrl).host`, preserving the port. The default property is `lmweb_url`; override it only when the repository/data team confirms another common field with `--environment-property <name>`. Keep the environment filter together with event, stable action match, and a time window covering the browser trigger. Do not block or broaden the workflow merely because a caller-supplied `distinct_id` is unavailable; add `--distinct-id` only when the user explicitly wants to narrow a known identity.
+Use the environment value without protocol or path. Derive local values from `new URL(startUrl).host`, preserving the port. The default property is `lmweb_url`; override it only when the repository/data team confirms another common field with `--environment-property <name>`. Keep the environment filter together with event, stable action match, and a time window covering the browser trigger. These selectors locate the intended rows; they do not add validation requirements beyond the data contract.
 
 If the query would be too broad because a generic event lacks a stable selector such as `btn_name` or `page`, ask only for that minimum business filter. Do not compensate by auditing wrappers, Tracking Maps, GA/GTM, or unrelated events.
 
@@ -289,7 +290,7 @@ node <skill-dir>/scripts/verify-sensors-events.mjs \
   --out /tmp/tracking-ingestion.json
 ```
 
-Add `--distinct-id <known-id>` only as an optional extra filter when the user explicitly requests identity-specific verification. Keep `QUERY_FAILED` distinct from `NOT_FOUND`. Check project, environment, time window, ingestion delay, credential, endpoint, and permission before concluding that an event is absent.
+Represent every document-declared field through the normal property contract and ignore platform-returned fields that the document does not declare. Keep `QUERY_FAILED` distinct from `NOT_FOUND`. Check project, environment, time window, ingestion delay, credential, endpoint, and permission before concluding that an event is absent.
 
 ## Capability: Generate the final acceptance report
 

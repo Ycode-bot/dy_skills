@@ -12,7 +12,7 @@ const DEFAULT_OPENAPI_QUERY_PATH = '/api/v3/analytics/v1/model/sql/query';
 const DEFAULT_LIMIT = 100;
 const DEFAULT_SINCE_MINUTES = 30;
 const DEFAULT_CREDENTIALS_FILE = path.join(os.homedir(), '.config', 'imastudio', 'sensors-credentials.json');
-const SENSITIVE_FIELD_PATTERN = /(token|secret|password|authorization|cookie|email|phone|mobile|account|userinfo)/i;
+const SENSITIVE_FIELD_PATTERN = /(token|secret|password|authorization|cookie|email|phone|mobile|account|userinfo|distinct[_-]?id)/i;
 const ENVIRONMENT_NAMES = new Set(['local', 'qa', 'production']);
 
 const HELP_TEXT = `Sensors Analytics event verifier
@@ -38,7 +38,6 @@ Query options:
   --auth-mode <mode>            token-query, openapi, bearer, or header
   --api-key-header <name>       Header mode only; default: X-API-Key
   --since-minutes <n>           Query window; default: contract value or 30
-  --distinct-id <id>            Optional extra filter for one known test identity
   --environment <name>          local, qa, or production
   --environment-value <value>   URL host substring without protocol/path; e.g. localhost:3000
   --environment-host <host>     Compatibility alias for --environment-value
@@ -84,7 +83,6 @@ function parseArgs(argv) {
         authMode: '',
         apiKeyHeader: '',
         sinceMinutes: undefined,
-        distinctId: '',
         environment: '',
         environmentValue: '',
         environmentHost: '',
@@ -108,7 +106,6 @@ function parseArgs(argv) {
         '--auth-mode',
         '--api-key-header',
         '--since-minutes',
-        '--distinct-id',
         '--environment',
         '--environment-value',
         '--environment-host',
@@ -151,7 +148,6 @@ function parseArgs(argv) {
             '--query-path': 'queryPath',
             '--auth-mode': 'authMode',
             '--api-key-header': 'apiKeyHeader',
-            '--distinct-id': 'distinctId',
             '--environment': 'environment',
             '--environment-value': 'environmentValue',
             '--environment-host': 'environmentHost',
@@ -500,7 +496,6 @@ function normalizeContract(raw, selectedEnvironment = '') {
             id: event.id || `${event.event}-${index + 1}`,
             event: event.event,
             trigger: event.trigger || '',
-            distinctId: event.distinctId || '',
             environmentRequirement: event.environmentRequirement || null,
             minCount,
             maxCount,
@@ -515,10 +510,6 @@ function normalizeContract(raw, selectedEnvironment = '') {
 
 function getEventName(row) {
     return row?.event ?? row?.event_name ?? row?.name;
-}
-
-function getDistinctId(row) {
-    return row?.distinct_id ?? row?.distinctId ?? row?.properties?.distinct_id;
 }
 
 function getProperty(row, name) {
@@ -563,10 +554,6 @@ function matchesType(value, expectedType) {
 function redactValue(name, value) {
     if (SENSITIVE_FIELD_PATTERN.test(name)) {
         return '[REDACTED]';
-    }
-    if (name === 'distinct_id' || name === 'distinctId') {
-        const text = String(value ?? '');
-        return text.length <= 4 ? '[REDACTED]' : `${text.slice(0, 2)}…${text.slice(-2)}`;
     }
     if (typeof value === 'string' && value.length > 160) {
         return `${value.slice(0, 157)}…`;
@@ -624,14 +611,10 @@ function inspectEvent(row, expected) {
     return issues;
 }
 
-function compareContract(contract, rows, options = {}) {
+function compareContract(contract, rows) {
     const results = contract.events.map(expected => {
-        const distinctId = options.distinctId || expected.distinctId;
         const candidates = rows.filter(row => {
             if (getEventName(row) !== expected.event) {
-                return false;
-            }
-            if (distinctId && String(getDistinctId(row)) !== String(distinctId)) {
                 return false;
             }
             return Object.entries(expected.match).every(([name, value]) => isDeepStrictEqual(getProperty(row, name), value));
@@ -643,8 +626,7 @@ function compareContract(contract, rows, options = {}) {
 
         if (candidates.length === 0) {
             status = 'NOT_FOUND';
-            const identityText = distinctId ? '、稳定字段和测试身份' : '和稳定字段';
-            issues.push({ code: 'NOT_FOUND', message: `未找到符合事件名${identityText}的入库事件` });
+            issues.push({ code: 'NOT_FOUND', message: '未找到符合事件名和稳定字段的入库事件' });
         }
         else if (candidates.length > expected.maxCount) {
             status = 'DUPLICATED';
@@ -731,7 +713,6 @@ function buildSensorsSql(expected, options = {}) {
     const sinceMinutes = options.sinceMinutes ?? expected.sinceMinutes ?? DEFAULT_SINCE_MINUTES;
     const now = options.now || new Date();
     const from = new Date(now.getTime() - sinceMinutes * 60 * 1000);
-    const distinctId = options.distinctId || expected.distinctId;
     const partitionCondition = options.authMode === 'openapi'
         ? `day BETWEEN ${Math.floor(from.getTime() / 86400000) - 1} AND ${Math.floor(now.getTime() / 86400000) + 1}`
         : `date BETWEEN '${formatLocalDate(from)}' AND '${formatLocalDate(now)}'`;
@@ -740,9 +721,6 @@ function buildSensorsSql(expected, options = {}) {
         `time >= '${formatLocalDateTime(from)}'`,
         `event = '${escapeSqlLiteral(expected.event)}'`,
     ];
-    if (distinctId) {
-        conditions.push(`distinct_id = '${escapeSqlLiteral(distinctId)}'`);
-    }
     for (const [name, value] of Object.entries(expected.match || {})) {
         conditions.push(`${quoteSqlIdentifier(name)} = ${formatSqlValue(value)}`);
     }
@@ -892,7 +870,6 @@ async function queryAllEvents(contract, options, env = process.env) {
     for (const expected of contract.events) {
         const cacheKey = JSON.stringify({
             event: expected.event,
-            distinctId: options.distinctId || expected.distinctId,
             sinceMinutes: options.sinceMinutes ?? expected.sinceMinutes,
             match: expected.match,
             environment: options.environment,
@@ -995,7 +972,7 @@ async function run(argv = process.argv.slice(2), env = process.env) {
     const rows = options.actual
         ? await readActualEvents(options.actual)
         : await queryAllEvents(contract, options, env);
-    const report = compareContract(contract, rows, { distinctId: options.distinctId });
+    const report = compareContract(contract, rows);
     const environmentValue = options.environmentValue || options.environmentHost;
     if (options.query && environmentValue) {
         report.environment = {

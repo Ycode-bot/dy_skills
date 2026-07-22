@@ -11,13 +11,6 @@
     "startUrl": { "type": "string", "format": "uri", "pattern": "^https?://" },
     "environment": { "enum": ["local", "qa", "production"] },
     "environmentHost": { "type": "string", "minLength": 1 },
-    "identity": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "distinctId": { "type": "string", "minLength": 1 }
-      }
-    },
     "steps": {
       "type": "array",
       "minItems": 1,
