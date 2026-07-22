@@ -11,6 +11,18 @@
 
 ## 2. 开始前的最小输入
 
+### Browser 插件依赖
+
+浏览器自动验收依赖 Codex 的 [@Browser](plugin://browser@openai-bundled) 插件，以及它提供的 `browser:control-in-app-browser` Skill。开始前先检查本次会话的可用 Skill：
+
+- 已列出 `browser:control-in-app-browser`：完整读取其 `SKILL.md`，按插件规范建立浏览器连接。
+- 未列出：返回 `BLOCKED`，明确提示“缺少 Browser 插件。请在 Codex 的插件面板安装或启用 Browser（OpenAI bundled），重新打开任务后再运行浏览器验收。”
+- Skill 已列出但插件内缺少 `scripts/browser-client.mjs`：提示 Browser 插件安装不完整，请从 Codex 插件面板重新安装。
+
+不要因为插件缺失而静默切换到独立 Playwright、Computer Use、外部浏览器 MCP 或其他自动化实现。安装或启用插件属于用户操作；Skill 只诊断并给出明确步骤，不自行修改 Codex 插件状态。
+
+### 业务验收输入
+
 需要确认以下信息；已能从上下文或页面安全读取时不要重复询问：
 
 - 数据需求截图、表格或 Version 2 埋点契约。

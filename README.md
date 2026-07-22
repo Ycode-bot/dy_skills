@@ -66,13 +66,29 @@ Disable auto-update for a run:
 ACTIVITY_CMS_PSD_AUTO_UPDATE=0 ./activity-cms-psd "/path/to/activity.psd" --out "/path/to/activity-output"
 ```
 
-`project-tracking-integrator` checks `Ycode-bot/dy_skills@project-tracking-integrator` at the beginning of every Skill invocation. Installed copies update atomically and continue with the latest instructions; Git working trees are never overwritten by default. Network or update failures do not block the local workflow.
+`project-tracking-integrator` reads a local update cache at the beginning of every invocation. By default it contacts GitHub at most once every 24 hours, checks the latest commit for that Skill path, and downloads the repository only when the revision changed. Installed copies update atomically and continue with the latest instructions; Git working trees are never overwritten by default. Failed checks wait one hour before retrying and do not block the local workflow.
+
+Force an immediate update check:
+
+```bash
+python3 ~/.agents/skills/project-tracking-integrator/scripts/self_update.py \
+  --dest ~/.agents/skills/project-tracking-integrator \
+  --force
+```
+
+Change the automatic interval:
+
+```bash
+export PROJECT_TRACKING_INTEGRATOR_UPDATE_INTERVAL_HOURS=24
+```
 
 Disable its auto-update for one invocation:
 
 ```bash
 PROJECT_TRACKING_INTEGRATOR_AUTO_UPDATE=0 codex
 ```
+
+Browser-driven tracking acceptance requires the Codex `Browser` plugin (`browser:control-in-app-browser`). If it is unavailable, install or enable **Browser (OpenAI bundled)** from the Codex plugin panel and reopen the task before running `browser-verify`.
 
 Asset compression runs by default with Tinify. Configure the API key before generating packages:
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -32,11 +33,17 @@ DEFAULT_REF = "main"
 AUTO_UPDATE_ENV = "PROJECT_TRACKING_INTEGRATOR_AUTO_UPDATE"
 SOURCE_ENV = "PROJECT_TRACKING_INTEGRATOR_SKILL_SOURCE"
 REF_ENV = "PROJECT_TRACKING_INTEGRATOR_UPDATE_REF"
+CHECK_INTERVAL_ENV = "PROJECT_TRACKING_INTEGRATOR_UPDATE_INTERVAL_HOURS"
+RETRY_INTERVAL_ENV = "PROJECT_TRACKING_INTEGRATOR_UPDATE_RETRY_HOURS"
+FORCE_UPDATE_ENV = "PROJECT_TRACKING_INTEGRATOR_FORCE_UPDATE"
 PRESERVE_NAMES = {".DS_Store", ".update-state.json", ".venv", "node_modules"}
 IGNORE_NAMES = PRESERVE_NAMES | {"__pycache__"}
 MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
 MAX_EXTRACTED_BYTES = 250 * 1024 * 1024
 LOCK_STALE_SECONDS = 120
+DEFAULT_CHECK_INTERVAL_HOURS = 24.0
+DEFAULT_RETRY_INTERVAL_HOURS = 1.0
+STATE_SCHEMA_VERSION = 1
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -50,6 +57,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--ref", default=os.environ.get(REF_ENV, DEFAULT_REF), help="Git ref")
     parser.add_argument("--timeout", type=int, default=20, help="Network timeout in seconds")
     parser.add_argument("--check-only", action="store_true", help="Report an update without installing it")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        default=os.environ.get(FORCE_UPDATE_ENV, "0").strip().lower() in {"1", "true", "yes", "on"},
+        help="Bypass the local check interval and contact GitHub now",
+    )
+    parser.add_argument(
+        "--interval-hours",
+        type=float,
+        default=os.environ.get(CHECK_INTERVAL_ENV, str(DEFAULT_CHECK_INTERVAL_HOURS)),
+        help=f"Minimum hours between automatic checks; default {DEFAULT_CHECK_INTERVAL_HOURS:g}",
+    )
     parser.add_argument(
         "--allow-git-checkout",
         action="store_true",
@@ -66,6 +85,94 @@ def parse_source(value: str) -> tuple[str, str, str]:
     if not match:
         raise ValueError("source must use owner/repo@skill with safe GitHub path characters")
     return match.group(1), match.group(2), match.group(3)
+
+
+def load_update_state(destination: Path) -> dict:
+    state_path = destination / ".update-state.json"
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def write_update_state(destination: Path, state: dict) -> None:
+    state_path = destination / ".update-state.json"
+    fd, temporary_name = tempfile.mkstemp(prefix=".update-state-", suffix=".json", dir=destination)
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
+            json.dump(state, output, ensure_ascii=False, indent=2, sort_keys=True)
+            output.write("\n")
+        os.replace(temporary_path, state_path)
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
+
+
+def state_matches(state: dict, source: str, ref: str) -> bool:
+    return (
+        state.get("schema_version") == STATE_SCHEMA_VERSION
+        and state.get("source") == source
+        and state.get("ref") == ref
+    )
+
+
+def cache_is_fresh(state: dict, source: str, ref: str, now: float) -> bool:
+    if not state_matches(state, source, ref):
+        return False
+    if state.get("update_available") is True and state.get("last_result") != "error":
+        return False
+    try:
+        return float(state.get("next_check_at", 0)) > now
+    except (TypeError, ValueError):
+        return False
+
+
+def project_tracking_integrator_cached_message(state: dict) -> str:
+    try:
+        next_check = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(state["next_check_at"])))
+        return f"{SKILL_NAME} update check cached until {next_check}; use --force to check now."
+    except (KeyError, TypeError, ValueError, OSError):
+        return f"{SKILL_NAME} update check is cached; use --force to check now."
+
+
+def build_update_state(
+    previous: dict,
+    *,
+    source: str,
+    ref: str,
+    now: float,
+    next_check_at: float,
+    result: str,
+    current_remote_sha: str | None = None,
+    update_available: bool = False,
+) -> dict:
+    state = {
+        "schema_version": STATE_SCHEMA_VERSION,
+        "source": source,
+        "ref": ref,
+        "last_checked_at": now,
+        "next_check_at": next_check_at,
+        "last_result": result,
+        "update_available": update_available,
+    }
+    previous_sha = previous.get("current_remote_sha") if state_matches(previous, source, ref) else None
+    resolved_sha = current_remote_sha or previous_sha
+    if resolved_sha:
+        state["current_remote_sha"] = resolved_sha
+    return state
+
+
+def retry_interval_hours() -> float:
+    raw = os.environ.get(RETRY_INTERVAL_ENV, str(DEFAULT_RETRY_INTERVAL_HOURS))
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{RETRY_INTERVAL_ENV} must be a non-negative number") from exc
+    if value < 0:
+        raise RuntimeError(f"{RETRY_INTERVAL_ENV} must be a non-negative number")
+    return value
 
 
 def iter_files(root: Path):
@@ -93,6 +200,35 @@ def is_git_checkout(directory: Path) -> bool:
         if (candidate / ".git").exists():
             return True
     return False
+
+
+def fetch_remote_revision(owner: str, repo: str, ref: str, remote_skill: str, timeout: int) -> str:
+    query = urllib.parse.urlencode({
+        "sha": ref,
+        "path": f"skills/{remote_skill}",
+        "per_page": 1,
+    })
+    url = f"https://api.github.com/repos/{owner}/{repo}/commits?{query}"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": f"{SKILL_NAME}-self-updater",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.load(response)
+    except (OSError, ValueError, urllib.error.URLError) as exc:
+        raise RuntimeError(f"revision check failed: {exc}") from exc
+    if not isinstance(payload, list) or not payload:
+        raise RuntimeError("revision check returned no commits for the Skill path")
+    revision = payload[0].get("sha") if isinstance(payload[0], dict) else None
+    if not isinstance(revision, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", revision):
+        raise RuntimeError("revision check returned an invalid commit SHA")
+    return revision.lower()
 
 
 def download_archive(owner: str, repo: str, ref: str, workdir: Path, timeout: int) -> Path:
@@ -204,7 +340,8 @@ def update_lock(destination: Path):
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    if os.environ.get(AUTO_UPDATE_ENV, "1").strip().lower() in {"0", "false", "no", "off"}:
+    automatic_disabled = os.environ.get(AUTO_UPDATE_ENV, "1").strip().lower() in {"0", "false", "no", "off"}
+    if automatic_disabled and not args.force and not args.check_only:
         print(f"{SKILL_NAME} auto-update is disabled for this run.", file=sys.stderr)
         return 0
 
@@ -215,12 +352,52 @@ def main(argv: list[str] | None = None) -> int:
     if is_git_checkout(destination) and not args.allow_git_checkout:
         print(f"{SKILL_NAME} auto-update skipped inside a Git working tree.", file=sys.stderr)
         return 0
+    if args.interval_hours < 0:
+        print(f"{SKILL_NAME} self-update failed: --interval-hours must be non-negative", file=sys.stderr)
+        return 1
 
     try:
         owner, repo, remote_skill = parse_source(args.source)
         if remote_skill != SKILL_NAME:
             raise RuntimeError(f"source skill must be {SKILL_NAME}, got {remote_skill}")
+        now = time.time()
+        state = load_update_state(destination)
+        if not args.force and not args.check_only and cache_is_fresh(state, args.source, args.ref, now):
+            print(f"{project_tracking_integrator_cached_message(state)}", file=sys.stderr)
+            return 0
         with update_lock(destination):
+            state = load_update_state(destination)
+            now = time.time()
+            if not args.force and not args.check_only and cache_is_fresh(state, args.source, args.ref, now):
+                print(f"{project_tracking_integrator_cached_message(state)}", file=sys.stderr)
+                return 0
+            remote_revision = fetch_remote_revision(owner, repo, args.ref, remote_skill, args.timeout)
+            current_revision = state.get("current_remote_sha") if state_matches(state, args.source, args.ref) else None
+            next_check_at = now + args.interval_hours * 3600
+            if current_revision == remote_revision:
+                write_update_state(destination, build_update_state(
+                    state,
+                    source=args.source,
+                    ref=args.ref,
+                    now=now,
+                    next_check_at=next_check_at,
+                    result="current",
+                    current_remote_sha=remote_revision,
+                ))
+                print(f"{SKILL_NAME} is already up to date.", file=sys.stderr)
+                return 0
+            if args.check_only and current_revision:
+                write_update_state(destination, build_update_state(
+                    state,
+                    source=args.source,
+                    ref=args.ref,
+                    now=now,
+                    next_check_at=now,
+                    result="update-available",
+                    update_available=True,
+                ))
+                print(f"{SKILL_NAME} update is available.", file=sys.stderr)
+                return 2
             with tempfile.TemporaryDirectory(prefix=f"{SKILL_NAME}-update-") as temporary:
                 workdir = Path(temporary)
                 archive_path = download_archive(owner, repo, args.ref, workdir, args.timeout)
@@ -229,12 +406,39 @@ def main(argv: list[str] | None = None) -> int:
                 source = repository_root / "skills" / remote_skill
                 validate_remote_skill(source, remote_skill)
                 if tree_digest(source) == tree_digest(destination):
+                    write_update_state(destination, build_update_state(
+                        state,
+                        source=args.source,
+                        ref=args.ref,
+                        now=now,
+                        next_check_at=next_check_at,
+                        result="current",
+                        current_remote_sha=remote_revision,
+                    ))
                     print(f"{SKILL_NAME} is already up to date.", file=sys.stderr)
                     return 0
                 if args.check_only:
+                    write_update_state(destination, build_update_state(
+                        state,
+                        source=args.source,
+                        ref=args.ref,
+                        now=now,
+                        next_check_at=now,
+                        result="update-available",
+                        update_available=True,
+                    ))
                     print(f"{SKILL_NAME} update is available.", file=sys.stderr)
                     return 2
                 atomic_install(source, destination)
+                write_update_state(destination, build_update_state(
+                    {},
+                    source=args.source,
+                    ref=args.ref,
+                    now=now,
+                    next_check_at=next_check_at,
+                    result="updated",
+                    current_remote_sha=remote_revision,
+                ))
                 print(
                     f"{SKILL_NAME} installed the latest files from "
                     f"{owner}/{repo}@{args.ref} (skills/{remote_skill}).",
@@ -242,6 +446,20 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 return 2
     except Exception as exc:
+        try:
+            now = time.time()
+            state = load_update_state(destination)
+            write_update_state(destination, build_update_state(
+                state,
+                source=args.source,
+                ref=args.ref,
+                now=now,
+                next_check_at=now + retry_interval_hours() * 3600,
+                result="error",
+                update_available=state.get("update_available") is True,
+            ))
+        except Exception:
+            pass
         print(f"{SKILL_NAME} self-update failed: {exc}", file=sys.stderr)
         return 1
 

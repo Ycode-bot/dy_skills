@@ -13,21 +13,31 @@ For narrower requests, stop as soon as the requested outcome is complete. Do not
 
 ## 0. Check for Skill updates
 
-At the beginning of every invocation, before scanning the target project, run this check exactly once when Python 3 is available:
+At the beginning of every invocation, before scanning the target project, run one update command when Python 3 is available. For a normal request, use the cached check:
 
 ```bash
 python3 <skill-dir>/scripts/self_update.py --dest <skill-dir>
 ```
 
+When the user explicitly asks to update, refresh, check the latest version, or bypass the cache, run this command instead of the normal command:
+
+```bash
+python3 <skill-dir>/scripts/self_update.py --dest <skill-dir> --force
+```
+
+Do not run both commands in one invocation. If updating is the user's only request, report whether the Skill changed and stop. If the user also requested tracking work, continue after the update result.
+
 Interpret the exit code as follows:
 
-- `0`: already current, disabled, or intentionally skipped; continue normally.
-- `2`: the installed Skill changed; re-read the updated `SKILL.md` and continue this invocation with the new files without running the updater again.
+- `0`: already current, disabled, cached, or intentionally skipped; continue normally.
+- `2`: the installed Skill changed, or `--check-only` found an update. After installation, re-read the updated `SKILL.md` and continue without running the updater again; after `--check-only`, report availability without claiming installation.
 - `1`: the network or update failed; warn briefly and continue with the local version.
 
-The updater downloads `Ycode-bot/dy_skills@project-tracking-integrator` from the `main` branch, validates the remote Skill, compares a complete file-tree digest, and replaces the installed directory atomically. It preserves local runtime directories, refuses to overwrite a Git working tree by default, and treats update failure as non-blocking.
+The updater stores non-secret timing and revision state in `.update-state.json`. Normal invocations use the cached result for 24 hours without contacting the network. When due, the updater first checks the latest Git commit that changed `skills/project-tracking-integrator`; it downloads the repository archive only when that revision differs or when no trusted local revision exists. Failed checks wait one hour before another automatic attempt. An explicit `--force` always bypasses the cache.
 
-Set `PROJECT_TRACKING_INTEGRATOR_AUTO_UPDATE=0` to disable one run. Override the trusted source or branch only when explicitly requested with `PROJECT_TRACKING_INTEGRATOR_SKILL_SOURCE=owner/repo@project-tracking-integrator` or `PROJECT_TRACKING_INTEGRATOR_UPDATE_REF=<ref>`.
+When a download is required, the updater validates the remote Skill, compares a complete file-tree digest, and replaces the installed directory atomically. It preserves local runtime directories, refuses to overwrite a Git working tree by default, and treats update failure as non-blocking.
+
+Set `PROJECT_TRACKING_INTEGRATOR_AUTO_UPDATE=0` to disable one run. Configure the normal interval with `PROJECT_TRACKING_INTEGRATOR_UPDATE_INTERVAL_HOURS` and failed-check retry delay with `PROJECT_TRACKING_INTEGRATOR_UPDATE_RETRY_HOURS`. Set `PROJECT_TRACKING_INTEGRATOR_FORCE_UPDATE=1` as the environment-variable equivalent of `--force`. Override the trusted source or branch only when explicitly requested with `PROJECT_TRACKING_INTEGRATOR_SKILL_SOURCE=owner/repo@project-tracking-integrator` or `PROJECT_TRACKING_INTEGRATOR_UPDATE_REF=<ref>`.
 
 ## 1. Route by user intent before using project tools
 
@@ -214,6 +224,8 @@ Verify required targets independently and confirm disabled targets do not fire. 
 ## Capability: Automate a browser journey and verify ingestion
 
 Use `browser-verify` only when the user asks Codex to operate the browser. Read [references/browser-verification.md](references/browser-verification.md) before taking browser actions and use [references/browser-journey.example.json](references/browser-journey.example.json) when a reusable test recipe is useful.
+
+Before any browser action, require the Codex [@Browser](plugin://browser@openai-bundled) plugin and its `browser:control-in-app-browser` Skill. If the Browser Skill is not listed for the session, return `BLOCKED` and tell the user: “缺少 Browser 插件。请在 Codex 的插件面板安装或启用 Browser（OpenAI bundled），重新打开任务后再运行浏览器验收。” Do not silently fall back to standalone Playwright, Computer Use, or another browser automation package. If the Browser Skill exists but its packaged `scripts/browser-client.mjs` is missing, report that the Browser plugin installation is incomplete and ask the user to reinstall it from the Codex plugin panel.
 
 The minimum acceptance loop is:
 

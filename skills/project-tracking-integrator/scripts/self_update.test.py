@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 import tempfile
+import time
 import unittest
 import zipfile
 
@@ -72,6 +74,123 @@ class SelfUpdateTests(unittest.TestCase):
             nested.mkdir(parents=True)
             self.assertTrue(UPDATER.is_git_checkout(nested))
 
+    def test_update_state_round_trip_and_ttl(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary)
+            state = UPDATER.build_update_state(
+                {},
+                source=UPDATER.DEFAULT_SOURCE,
+                ref=UPDATER.DEFAULT_REF,
+                now=100,
+                next_check_at=200,
+                result="current",
+                current_remote_sha="a" * 40,
+            )
+            UPDATER.write_update_state(destination, state)
+            loaded = UPDATER.load_update_state(destination)
+
+            self.assertEqual(loaded["current_remote_sha"], "a" * 40)
+            self.assertTrue(UPDATER.cache_is_fresh(loaded, UPDATER.DEFAULT_SOURCE, UPDATER.DEFAULT_REF, 150))
+            self.assertFalse(UPDATER.cache_is_fresh(loaded, UPDATER.DEFAULT_SOURCE, UPDATER.DEFAULT_REF, 201))
+
+    def test_main_uses_fresh_cache_without_network(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary) / "installed"
+            destination.mkdir()
+            (destination / "SKILL.md").write_text(
+                "---\nname: project-tracking-integrator\n---\ncurrent\n",
+                encoding="utf-8",
+            )
+            now = time.time()
+            UPDATER.write_update_state(destination, UPDATER.build_update_state(
+                {},
+                source=UPDATER.DEFAULT_SOURCE,
+                ref=UPDATER.DEFAULT_REF,
+                now=now,
+                next_check_at=now + 3600,
+                result="current",
+                current_remote_sha="a" * 40,
+            ))
+            original_revision = UPDATER.fetch_remote_revision
+            UPDATER.fetch_remote_revision = lambda *_args, **_kwargs: self.fail("network should not be used")
+            try:
+                result = UPDATER.main(["--dest", str(destination)])
+            finally:
+                UPDATER.fetch_remote_revision = original_revision
+
+            self.assertEqual(result, 0)
+
+    def test_force_bypasses_fresh_cache_but_avoids_download_when_revision_matches(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary) / "installed"
+            destination.mkdir()
+            (destination / "SKILL.md").write_text(
+                "---\nname: project-tracking-integrator\n---\ncurrent\n",
+                encoding="utf-8",
+            )
+            revision = "b" * 40
+            now = time.time()
+            UPDATER.write_update_state(destination, UPDATER.build_update_state(
+                {},
+                source=UPDATER.DEFAULT_SOURCE,
+                ref=UPDATER.DEFAULT_REF,
+                now=now,
+                next_check_at=now + 3600,
+                result="current",
+                current_remote_sha=revision,
+            ))
+            revision_calls = 0
+            original_revision = UPDATER.fetch_remote_revision
+            original_download = UPDATER.download_archive
+
+            def fetch_revision(*_args, **_kwargs):
+                nonlocal revision_calls
+                revision_calls += 1
+                return revision
+
+            UPDATER.fetch_remote_revision = fetch_revision
+            UPDATER.download_archive = lambda *_args, **_kwargs: self.fail("archive should not be downloaded")
+            previous_auto_update = os.environ.get(UPDATER.AUTO_UPDATE_ENV)
+            os.environ[UPDATER.AUTO_UPDATE_ENV] = "0"
+            try:
+                result = UPDATER.main(["--dest", str(destination), "--force"])
+            finally:
+                UPDATER.fetch_remote_revision = original_revision
+                UPDATER.download_archive = original_download
+                if previous_auto_update is None:
+                    os.environ.pop(UPDATER.AUTO_UPDATE_ENV, None)
+                else:
+                    os.environ[UPDATER.AUTO_UPDATE_ENV] = previous_auto_update
+
+            self.assertEqual(result, 0)
+            self.assertEqual(revision_calls, 1)
+
+    def test_failed_check_is_cached_for_retry_interval(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary) / "installed"
+            destination.mkdir()
+            (destination / "SKILL.md").write_text(
+                "---\nname: project-tracking-integrator\n---\ncurrent\n",
+                encoding="utf-8",
+            )
+            original_revision = UPDATER.fetch_remote_revision
+            UPDATER.fetch_remote_revision = lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("offline"))
+            try:
+                result = UPDATER.main(["--dest", str(destination), "--force"])
+            finally:
+                UPDATER.fetch_remote_revision = original_revision
+
+            state = UPDATER.load_update_state(destination)
+            self.assertEqual(result, 1)
+            self.assertEqual(state["last_result"], "error")
+            self.assertGreater(state["next_check_at"], time.time())
+            self.assertTrue(UPDATER.cache_is_fresh(
+                state,
+                UPDATER.DEFAULT_SOURCE,
+                UPDATER.DEFAULT_REF,
+                time.time(),
+            ))
+
     def test_main_installs_a_valid_remote_skill_archive(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -93,15 +212,19 @@ class SelfUpdateTests(unittest.TestCase):
                 )
 
             original_download = UPDATER.download_archive
+            original_revision = UPDATER.fetch_remote_revision
             UPDATER.download_archive = lambda *_args, **_kwargs: archive_path
+            UPDATER.fetch_remote_revision = lambda *_args, **_kwargs: "c" * 40
             try:
                 result = UPDATER.main(["--dest", str(destination)])
             finally:
                 UPDATER.download_archive = original_download
+                UPDATER.fetch_remote_revision = original_revision
 
             self.assertEqual(result, 2)
             self.assertIn("new", (destination / "SKILL.md").read_text(encoding="utf-8"))
             self.assertTrue((destination / "scripts" / "tool.py").is_file())
+            self.assertEqual(UPDATER.load_update_state(destination)["current_remote_sha"], "c" * 40)
 
 
 if __name__ == "__main__":
