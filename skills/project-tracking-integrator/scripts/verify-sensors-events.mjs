@@ -38,6 +38,8 @@ Query options:
   --api-key-header <name>       Header mode only; default: X-API-Key
   --since-minutes <n>           Query window; default: contract value or 30
   --distinct-id <id>            Narrow all contracts to one test identity
+  --environment-host <host>     Require URL property to contain this environment hostname
+  --environment-property <key>  URL property used for environment; default: lmweb_url
   --limit <n>                   Per-contract row limit; default 100, maximum 1000
   --timeout-ms <n>              Request timeout; default 30000
   --dry-run                     Print redacted endpoint and SQL without querying
@@ -80,6 +82,8 @@ function parseArgs(argv) {
         apiKeyHeader: '',
         sinceMinutes: undefined,
         distinctId: '',
+        environmentHost: '',
+        environmentProperty: 'lmweb_url',
         limit: DEFAULT_LIMIT,
         timeoutMs: 30000,
         format: 'markdown',
@@ -100,6 +104,8 @@ function parseArgs(argv) {
         '--api-key-header',
         '--since-minutes',
         '--distinct-id',
+        '--environment-host',
+        '--environment-property',
         '--limit',
         '--timeout-ms',
         '--format',
@@ -139,6 +145,8 @@ function parseArgs(argv) {
             '--auth-mode': 'authMode',
             '--api-key-header': 'apiKeyHeader',
             '--distinct-id': 'distinctId',
+            '--environment-host': 'environmentHost',
+            '--environment-property': 'environmentProperty',
             '--format': 'format',
             '--out': 'out',
         };
@@ -183,6 +191,15 @@ function validateOptions(options) {
     }
     if (!Number.isInteger(options.timeoutMs) || options.timeoutMs < 1000) {
         fail('--timeout-ms must be an integer of at least 1000');
+    }
+    if (options.environmentHost) {
+        if (!options.query) {
+            fail('--environment-host is only supported with --query');
+        }
+        if (!/^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/.test(options.environmentHost)) {
+            fail('--environment-host must be a hostname without protocol, path, port, or wildcard');
+        }
+        quoteSqlIdentifier(options.environmentProperty);
     }
 }
 
@@ -661,6 +678,9 @@ function buildSensorsSql(expected, options = {}) {
     for (const [name, value] of Object.entries(expected.match || {})) {
         conditions.push(`${quoteSqlIdentifier(name)} = ${formatSqlValue(value)}`);
     }
+    if (options.environmentHost) {
+        conditions.push(`${quoteSqlIdentifier(options.environmentProperty || 'lmweb_url')} LIKE '%${escapeSqlLiteral(options.environmentHost)}%'`);
+    }
     return `SELECT * FROM events WHERE ${conditions.join(' AND ')} ORDER BY time DESC LIMIT ${options.limit || DEFAULT_LIMIT}`;
 }
 
@@ -806,6 +826,8 @@ async function queryAllEvents(contract, options, env = process.env) {
             distinctId: options.distinctId || expected.distinctId,
             sinceMinutes: options.sinceMinutes ?? expected.sinceMinutes,
             match: expected.match,
+            environmentHost: options.environmentHost,
+            environmentProperty: options.environmentProperty,
             limit: options.limit,
         });
         if (!cache.has(cacheKey)) {
@@ -824,10 +846,15 @@ function formatMarkdown(report, sourceLabel) {
         `- 生成时间：${report.generatedAt}`,
         `- 数据来源：${sourceLabel}`,
         `- 结果：${report.summary.passed}/${report.summary.total} 通过`,
+    ];
+    if (report.environment) {
+        lines.push(`- 环境过滤：\`${report.environment.property}\` 包含 \`${report.environment.host}\``);
+    }
+    lines.push(
         '',
         '| 契约 | 事件 | 状态 | 候选条数 | 通过条数 |',
         '|---|---|---:|---:|---:|',
-    ];
+    );
     for (const result of report.results) {
         lines.push(`| ${result.id} | ${result.event} | ${result.status} | ${result.candidateCount} | ${result.passingCount} |`);
     }
@@ -847,7 +874,11 @@ function formatMarkdown(report, sourceLabel) {
 function formatDryRun(contract, options, env = process.env) {
     const config = resolveQueryConfig({ ...options, dryRun: true }, env);
     const lines = config.baseUrls.map(baseUrl => `Endpoint: ${makeEndpoint(config, baseUrl, true).toString()}`);
-    lines.push(`Profile: ${options.credentialProfile?.name || 'environment/CLI'}`, `Auth mode: ${config.authMode}`, '');
+    lines.push(`Profile: ${options.credentialProfile?.name || 'environment/CLI'}`, `Auth mode: ${config.authMode}`);
+    if (options.environmentHost) {
+        lines.push(`Environment: ${options.environmentProperty || 'lmweb_url'} contains ${options.environmentHost}`);
+    }
+    lines.push('');
     for (const expected of contract.events) {
         lines.push(`[${expected.id}]`, buildSensorsSql(expected, { ...options, authMode: config.authMode }), '');
     }
@@ -890,6 +921,12 @@ async function run(argv = process.argv.slice(2), env = process.env) {
         ? await readActualEvents(options.actual)
         : await queryAllEvents(contract, options, env);
     const report = compareContract(contract, rows, { distinctId: options.distinctId });
+    if (options.query && options.environmentHost) {
+        report.environment = {
+            property: options.environmentProperty || 'lmweb_url',
+            host: options.environmentHost,
+        };
+    }
     const output = options.format === 'json'
         ? `${JSON.stringify(report, null, 2)}\n`
         : formatMarkdown(report, options.actual ? `离线事件文件 ${options.actual}` : '神策查询 API');

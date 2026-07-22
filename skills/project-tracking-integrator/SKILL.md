@@ -72,6 +72,7 @@ When both code and data language appear, prefer `verify-data` if the requested c
 4. If credentials, project, time range, or a safe filter are missing, return `BLOCKED` with only the minimum missing input. Do not switch to source audit.
 5. If the API request fails, return `QUERY_FAILED`; if it succeeds with no rows, return `NOT_FOUND`.
 6. Return `PASS`, `NOT_FOUND`, `COUNT_MISMATCH`, `DUPLICATED`, `CONTRACT_MISMATCH`, `BLOCKED`, or `QUERY_FAILED` for every requested event. A prose code review is not a valid result.
+7. When one analytics project contains multiple deployment environments, require an environment filter before querying. Never mix QA and production rows in one acceptance conclusion.
 
 ### Narrow-mode examples
 
@@ -222,6 +223,15 @@ Resolve Sensors query configuration in this order without printing secrets:
 
 The verifier discovers options 2 and 3 automatically. When any configured option is available, run the API query instead of asking the user to configure it again.
 
+When the same Sensors project receives more than one application environment, add an environment hostname filter to every live query. For ImaStudio use the common URL property shown in Sensors:
+
+| Verification stage | Required query condition | CLI option |
+|---|---|---|
+| QA acceptance before release | `lmweb_url` contains `qa.imastudio.com` | `--environment-host qa.imastudio.com` |
+| Production smoke check after release | `lmweb_url` contains `www.imastudio.com` | `--environment-host www.imastudio.com` |
+
+The default property is `lmweb_url`; override it only when the repository/data team confirms another common URL field with `--environment-property <name>`. Keep the environment filter together with event, stable action match, short time window, and preferably a test `distinct_id`. The hostname separates environments but does not identify the individual tester.
+
 If the query would be too broad because both a test identity and stable selector are missing, ask only for the minimum missing filter. Do not compensate by auditing wrappers, Tracking Maps, GA/GTM, or unrelated events.
 
 When a required Sensors target must be checked for ingestion, read [references/sensors-verification.md](references/sensors-verification.md). Use the configured private Profile JSON or environment variables; never use the frontend `server_url` as a query endpoint.
@@ -234,6 +244,7 @@ node <skill-dir>/scripts/verify-sensors-events.mjs \
   --query \
   --credentials <private-credentials.json> \
   --profile <profile> \
+  --environment-host <qa-or-production-hostname> \
   --distinct-id <test-identity> \
   --dry-run
 ```
@@ -246,6 +257,7 @@ node <skill-dir>/scripts/verify-sensors-events.mjs \
   --query \
   --credentials <private-credentials.json> \
   --profile <profile> \
+  --environment-host <qa-or-production-hostname> \
   --distinct-id <test-identity> \
   --since-minutes 30 \
   --format json \

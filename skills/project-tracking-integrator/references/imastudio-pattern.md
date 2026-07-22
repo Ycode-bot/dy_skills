@@ -126,3 +126,5 @@ Example for `trackDiscountOfferClaim`:
 ```
 
 Filter live verification with a test `distinct_id`, a short time window, and the test environment's confirmed Sensors query project. Update the tracking-map status only after the query succeeds and the returned event satisfies the contract. Record query failure separately from zero matching events.
+
+Because ImaStudio QA and production currently share the same Sensors project, every live verification query must also filter the common URL property. Use `--environment-host qa.imastudio.com` before release and `--environment-host www.imastudio.com` for the post-release smoke check. The verifier maps this to `lmweb_url LIKE '%<hostname>%'`. Do not combine both environments in one count, and do not treat the hostname as a replacement for the test `distinct_id`.

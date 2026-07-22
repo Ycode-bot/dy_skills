@@ -13,6 +13,7 @@ import {
     parseOpenApiRows,
     querySensorsEvent,
     resolveCredentialsFile,
+    run,
 } from './verify-sensors-events.mjs';
 
 const contract = normalizeContract({
@@ -217,6 +218,33 @@ test('buildSensorsSql escapes literals and keeps a bounded query', () => {
     assert.match(sql, /LIMIT 50$/);
 });
 
+test('buildSensorsSql isolates QA and production by URL hostname', () => {
+    const qaSql = buildSensorsSql(contract.events[0], {
+        environmentHost: 'qa.imastudio.com',
+        environmentProperty: 'lmweb_url',
+    });
+    const productionSql = buildSensorsSql(contract.events[0], {
+        environmentHost: 'www.imastudio.com',
+        environmentProperty: 'lmweb_url',
+    });
+
+    assert.match(qaSql, /`lmweb_url` LIKE '%qa\.imastudio\.com%'/);
+    assert.doesNotMatch(qaSql, /www\.imastudio\.com/);
+    assert.match(productionSql, /`lmweb_url` LIKE '%www\.imastudio\.com%'/);
+    assert.doesNotMatch(productionSql, /qa\.imastudio\.com/);
+});
+
+test('environment host is rejected outside live query mode', async () => {
+    await assert.rejects(
+        () => run([
+            '--spec', '/missing/contract.json',
+            '--actual', '/missing/events.json',
+            '--environment-host', 'qa.imastudio.com',
+        ]),
+        /only supported with --query/,
+    );
+});
+
 test('dry-run redacts the query credential', () => {
     const output = formatDryRun(contract, {
         baseUrl: 'https://sensor.example.com',
@@ -230,6 +258,23 @@ test('dry-run redacts the query credential', () => {
     });
     assert.doesNotMatch(output, /must-not-appear/);
     assert.match(output, /REDACTED/);
+});
+
+test('dry-run prints the environment isolation condition', () => {
+    const output = formatDryRun(contract, {
+        baseUrl: 'https://sensor.example.com',
+        project: 'AiProduct',
+        queryPath: '/api/sql/query',
+        authMode: 'token-query',
+        dryRun: true,
+        limit: 10,
+        environmentHost: 'qa.imastudio.com',
+        environmentProperty: 'lmweb_url',
+    }, {
+        SENSORS_QUERY_API_SECRET: 'must-not-appear',
+    });
+    assert.match(output, /Environment: lmweb_url contains qa\.imastudio\.com/);
+    assert.match(output, /`lmweb_url` LIKE '%qa\.imastudio\.com%'/);
 });
 
 test('querySensorsEvent calls SQL API and parses NDJSON without exposing credential', async () => {
