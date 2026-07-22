@@ -1,6 +1,6 @@
 ---
 name: project-tracking-integrator
-description: Discover, bootstrap, extend, implement, and verify product analytics across Sensors Analytics, GA4, Google Tag Manager, Google Ads, Segment, Mixpanel, Amplitude, and PostHog. Use when Codex needs to scan a project for an existing 埋点体系, establish a tracking foundation, convert a data-team spreadsheet/screenshot/document into an event contract, create business tracking methods, instrument triggers, audit code, validate 上报数据准确性, query 神策入库数据, compare required fields with actual platform data, or produce an end-to-end acceptance report. Treat requests about 上报数据、数据准确性、字段值是否正确、是否有数据 as live data verification rather than source-code audit unless the user explicitly asks to inspect code.
+description: Discover, bootstrap, extend, implement, and verify product analytics across Sensors Analytics, GA4, Google Tag Manager, Google Ads, Segment, Mixpanel, Amplitude, and PostHog. Use when Codex needs to scan a project for an existing 埋点体系, establish a tracking foundation, convert a data-team spreadsheet/screenshot/document into an event contract, create business tracking methods, instrument triggers, audit code, automate a browser journey to trigger events, validate 上报数据准确性, query 神策入库数据, compare required fields with actual platform data, or produce an end-to-end acceptance report. Treat requests about 上报数据、数据准确性、字段值是否正确、是否有数据 as live data verification rather than source-code audit unless the user explicitly asks to inspect code.
 ---
 
 # Project Tracking Integrator
@@ -42,6 +42,7 @@ Select one primary mode from the user's requested outcome before scanning files,
 | `verify-source` | “检查代码实现”“审计 wrapper”“对照文档检查调用点” | Requirement contract plus relevant wrappers/call sites and static checks | Browser actions and platform query unless requested |
 | `verify-runtime` | “检查抓到的请求对不对”“对比 Network payload” | Contract plus captured SDK/browser payload | Repository-wide scan, code changes, ingestion query |
 | `verify-data` | “检测上报数据准确性”“字段值对不对”“检查我埋的数据”“神策有没有数据”“对比截图和神策入库” | Screenshot/document contract, direct read-only platform query, field/count comparison | Repository scan, GA/GTM inventory, wrapper/call-site audit, code changes |
+| `browser-verify` | “浏览器自动操作后验证埋点”“自动触发事件再查神策”“跑一遍页面并对比上报” | Contract, authorized browser journey, UI outcome, optional SDK console evidence, environment-isolated platform query | Repository-wide scan, source audit, or code changes unless separately requested |
 | `full-lifecycle` | “从零接入并完整验收”“实现后验证源码、发送和入库” | All explicitly relevant lifecycle stages | Nothing required by the agreed acceptance contract |
 
 Use these routing rules:
@@ -49,7 +50,7 @@ Use these routing rules:
 1. Prefer the narrowest mode that fully satisfies the request.
 2. If the user explicitly requests multiple outcomes, compose only those modes in dependency order; do not append unrequested modes.
 3. Run repository discovery only when code architecture is a prerequisite. A screenshot-to-Sensors comparison does not require a project scan.
-4. Query a live analytics API only in `verify-data` or an explicitly requested `full-lifecycle`/combined mode.
+4. Query a live analytics API only in `verify-data`, `browser-verify`, or an explicitly requested `full-lifecycle`/combined mode.
 5. Modify code only in `generate-method`, `instrument`, or an explicitly requested full implementation mode.
 6. Inspect GA/GTM/Google Ads only when the request or contract includes those targets.
 7. Generate the combined acceptance report only in `full-lifecycle` or when the user asks for that report.
@@ -80,6 +81,8 @@ When both code and data language appear, prefer `verify-data` if the requested c
 - `$project-tracking-integrator [截图] 检测上报数据的准确性` → `verify-data`: query the configured Sensors project and compare actual ingested values. Do not run `verify-tracking-source.mjs`.
 - `$project-tracking-integrator 根据这份文档生成对应的埋点方法` → `generate-method`: locate the existing transport and nearest wrapper pattern, add the method, run a narrow static check, and stop. Do not add business call sites or query Sensors.
 - `$project-tracking-integrator 给支付成功流程加埋点` → `instrument`: implement the requested wrapper and call site, run source checks, and stop before live data verification.
+- `$project-tracking-integrator 在 QA 自动点击领取按钮并验证神策数据` → `browser-verify`: execute only the supplied browser journey, verify its visible outcome, query QA ingestion, compare the contract, and stop. Do not scan or modify the repository.
+- `$project-tracking-integrator 完成埋点后用浏览器跑一遍并验收` → compose `instrument → browser-verify`: implement first, then run only the agreed QA journey and ingestion comparison. Do not append unrelated platform audits.
 - `$project-tracking-integrator 完整接入这些事件并验证神策入库` → `full-lifecycle`: run the relevant end-to-end stages.
 
 ## Authorization and safety
@@ -205,9 +208,26 @@ For GA4, GTM, Google Ads, or another manually inspected target, record the evide
 
 Verify required targets independently and confirm disabled targets do not fire. Do not claim runtime success from source inspection alone.
 
+## Capability: Automate a browser journey and verify ingestion
+
+Use `browser-verify` only when the user asks Codex to operate the browser. Read [references/browser-verification.md](references/browser-verification.md) before taking browser actions and use [references/browser-journey.example.json](references/browser-journey.example.json) when a reusable test recipe is useful.
+
+The minimum acceptance loop is:
+
+1. Normalize the supplied screenshot/document into a contract and resolve the target environment, start URL, test identity, and browser journey.
+2. Reuse the signed-in in-app browser session. Inspect the live DOM and validate one unique locator immediately before each action; never guess selectors from source code or screenshots.
+3. Record the start time, execute only the authorized steps, and verify the visible UI result after every trigger.
+4. Read redacted SDK console output when the application exposes it. Treat this as optional runtime evidence because the in-app browser does not expose general Network request interception.
+5. After a bounded ingestion wait, query the analytics API with the same event contract, environment hostname, short time window, stable match fields, and preferably the same `distinct_id`.
+6. Compare event name, properties, values, types, identity, and expected count. If the first query returns `NOT_FOUND`, permit at most one delayed re-query before concluding.
+
+The platform query is mandatory in this mode. A successful click, UI transition, or console message does not prove ingestion. Conversely, do not claim that an outgoing request was captured unless an actual SDK log or captured payload was observed.
+
+Return `BLOCKED` with only the missing input when the start URL, safe test journey, environment filter, contract, authentication state, or sufficiently narrow identity/match filter is unavailable. Hand CAPTCHA, OTP, passkeys, and account login to the user; never inspect cookies or browser storage to recover credentials.
+
 ## Capability: Verify platform ingestion
 
-In `verify-data`, do not begin with repository discovery. Follow this minimal path:
+In `verify-data` and the ingestion portion of `browser-verify`, do not begin with repository discovery. Follow this minimal path:
 
 1. Transcribe only the requested events, match selectors, properties, expected values, and count constraints from the supplied screenshot/document into a temporary contract.
 2. Use the specified platform and configured read-only credential. Do not infer additional targets.
@@ -302,6 +322,7 @@ Return only the artifact required by the selected mode. Do not pad a narrow requ
 - `verify-source` → source/document difference report.
 - `verify-runtime` → captured-payload difference report.
 - `verify-data` → platform query comparison and clear PASS/FAIL/QUERY_FAILED result.
+- `browser-verify` → browser-step evidence, visible UI outcome, optional SDK console evidence, platform query comparison, and a clear final result.
 - `full-lifecycle` → scan, contract, implementation, separate evidence layers, and combined acceptance report.
 
 In full-lifecycle mode, do not declare completion until all required evidence layers agree. Code presence does not prove a reachable trigger, a successful request does not prove ingestion, and a same-named ingested event does not prove the property contract.

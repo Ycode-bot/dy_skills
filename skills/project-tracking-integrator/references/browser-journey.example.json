@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "name": "qa-discount-popup-claim",
+  "startUrl": "https://qa.imastudio.com/example",
+  "environmentHost": "qa.imastudio.com",
+  "identity": {
+    "distinctId": "${TEST_DISTINCT_ID}"
+  },
+  "steps": [
+    {
+      "action": "goto",
+      "url": "https://qa.imastudio.com/example"
+    },
+    {
+      "action": "click",
+      "locator": {
+        "type": "testId",
+        "value": "open-discount-popup"
+      },
+      "expect": {
+        "type": "visibleText",
+        "value": "领取优惠"
+      }
+    },
+    {
+      "action": "click",
+      "locator": {
+        "type": "role",
+        "role": "button",
+        "name": "领取优惠"
+      },
+      "expect": {
+        "type": "visibleText",
+        "value": "领取成功"
+      }
+    }
+  ],
+  "verification": {
+    "contract": "./tracking-contract.json",
+    "sinceMinutes": 10,
+    "ingestionWaitSeconds": 15,
+    "maxQueryAttempts": 2,
+    "consolePattern": "sensors|track"
+  }
+}
