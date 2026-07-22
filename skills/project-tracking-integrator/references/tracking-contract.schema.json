@@ -11,6 +11,15 @@
     "defaults": {
       "$ref": "#/$defs/countWindow"
     },
+    "environments": {
+      "type": "object",
+      "propertyNames": {
+        "enum": ["local", "qa", "production"]
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/environmentProfile"
+      }
+    },
     "events": {
       "type": "array",
       "minItems": 1,
@@ -35,6 +44,46 @@
         "maxCount": {
           "type": "integer",
           "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "environmentProfile": {
+      "type": "object",
+      "required": ["startUrl", "query"],
+      "properties": {
+        "startUrl": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://"
+        },
+        "identityRequired": {
+          "type": "boolean"
+        },
+        "query": {
+          "type": "object",
+          "required": ["property", "operator"],
+          "properties": {
+            "property": {
+              "type": "string",
+              "minLength": 1
+            },
+            "operator": {
+              "const": "contains"
+            },
+            "value": {
+              "type": "string",
+              "minLength": 1
+            },
+            "valueFrom": {
+              "const": "browser-host"
+            }
+          },
+          "oneOf": [
+            { "required": ["value"] },
+            { "required": ["valueFrom"] }
+          ],
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -90,9 +139,38 @@
         "validation": {
           "type": "object",
           "properties": {
-            "testIdentityRequired": { "type": "boolean" }
+            "testIdentityRequired": { "type": "boolean" },
+            "environments": {
+              "type": "object",
+              "propertyNames": {
+                "enum": ["local", "qa", "production"]
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/environmentRequirement"
+              }
+            }
           },
           "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "environmentRequirement": {
+      "type": "object",
+      "required": ["status", "evidence"],
+      "properties": {
+        "status": {
+          "enum": ["required", "optional", "disabled", "unknown"]
+        },
+        "evidence": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": ["source", "browser", "runtime", "ingestion"]
+          }
+        },
+        "smokeSafe": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false

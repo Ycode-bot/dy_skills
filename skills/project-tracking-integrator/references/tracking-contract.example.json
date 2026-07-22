@@ -6,6 +6,35 @@
     "minCount": 1,
     "maxCount": 1
   },
+  "environments": {
+    "local": {
+      "startUrl": "http://localhost:3000",
+      "identityRequired": true,
+      "query": {
+        "property": "lmweb_url",
+        "operator": "contains",
+        "valueFrom": "browser-host"
+      }
+    },
+    "qa": {
+      "startUrl": "https://qa.imastudio.com",
+      "identityRequired": true,
+      "query": {
+        "property": "lmweb_url",
+        "operator": "contains",
+        "value": "qa.imastudio.com"
+      }
+    },
+    "production": {
+      "startUrl": "https://www.imastudio.com",
+      "identityRequired": true,
+      "query": {
+        "property": "lmweb_url",
+        "operator": "contains",
+        "value": "www.imastudio.com"
+      }
+    }
+  },
   "events": [
     {
       "id": "discount-popup-claim-click",
@@ -59,7 +88,22 @@
         }
       },
       "validation": {
-        "testIdentityRequired": true
+        "testIdentityRequired": true,
+        "environments": {
+          "local": {
+            "status": "required",
+            "evidence": ["source", "browser", "ingestion"]
+          },
+          "qa": {
+            "status": "required",
+            "evidence": ["browser", "ingestion"]
+          },
+          "production": {
+            "status": "required",
+            "evidence": ["browser", "ingestion"],
+            "smokeSafe": true
+          }
+        }
       }
     }
   ]

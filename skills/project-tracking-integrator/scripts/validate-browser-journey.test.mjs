@@ -14,6 +14,8 @@ test('browser journey example is valid', () => {
     assert.deepEqual(validateBrowserJourney(example), {
         status: 'PASS',
         name: 'qa-discount-popup-claim',
+        environment: 'qa',
+        environmentValue: 'qa.imastudio.com',
         stepCount: 3,
         issues: [],
     });
@@ -24,7 +26,26 @@ test('browser journey cannot navigate outside the verification environment', () 
     journey.steps[0].url = 'https://www.imastudio.com/example';
     const report = validateBrowserJourney(journey);
     assert.equal(report.status, 'INVALID');
-    assert.match(report.issues.join('\n'), /hostname must equal environmentHost/);
+    assert.match(report.issues.join('\n'), /origin must equal startUrl origin/);
+});
+
+test('browser journey derives a protocol-free local host with port', () => {
+    const journey = structuredClone(example);
+    journey.name = 'local-discount-popup-claim';
+    journey.environment = 'local';
+    journey.startUrl = 'http://localhost:3000/example';
+    journey.steps[0].url = 'http://localhost:3000/example';
+    const report = validateBrowserJourney(journey);
+    assert.equal(report.status, 'PASS');
+    assert.equal(report.environmentValue, 'localhost:3000');
+});
+
+test('browser journey rejects a production URL labeled as local', () => {
+    const journey = structuredClone(example);
+    journey.environment = 'local';
+    const report = validateBrowserJourney(journey);
+    assert.equal(report.status, 'INVALID');
+    assert.match(report.issues.join('\n'), /local journey must use/);
 });
 
 test('browser journey requires unique locator intent and bounded platform queries', () => {

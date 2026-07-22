@@ -1,6 +1,6 @@
 ---
 name: project-tracking-integrator
-description: Discover, bootstrap, extend, implement, and verify product analytics across Sensors Analytics, GA4, Google Tag Manager, Google Ads, Segment, Mixpanel, Amplitude, and PostHog. Use when Codex needs to scan a project for an existing 埋点体系, establish a tracking foundation, convert a data-team spreadsheet/screenshot/document into an event contract, create business tracking methods, instrument triggers, audit code, automate a browser journey to trigger events, validate 上报数据准确性, query 神策入库数据, compare required fields with actual platform data, or produce an end-to-end acceptance report. Treat requests about 上报数据、数据准确性、字段值是否正确、是否有数据 as live data verification rather than source-code audit unless the user explicitly asks to inspect code.
+description: Discover, bootstrap, extend, implement, and verify product analytics across Sensors Analytics, GA4, Google Tag Manager, Google Ads, Segment, Mixpanel, Amplitude, and PostHog. Use when Codex needs to scan a project for an existing 埋点体系, establish a tracking foundation, convert a data-team spreadsheet/screenshot/document into an event contract, create business tracking methods, instrument triggers, audit code, automate a browser journey to trigger events, validate local/QA/production 上报数据准确性, query 神策入库数据, compare required fields with actual platform data, enforce environment promotion gates, or produce an end-to-end acceptance report. Treat requests about 上报数据、数据准确性、字段值是否正确、是否有数据 as live data verification rather than source-code audit unless the user explicitly asks to inspect code.
 ---
 
 # Project Tracking Integrator
@@ -73,7 +73,7 @@ When both code and data language appear, prefer `verify-data` if the requested c
 4. If credentials, project, time range, or a safe filter are missing, return `BLOCKED` with only the minimum missing input. Do not switch to source audit.
 5. If the API request fails, return `QUERY_FAILED`; if it succeeds with no rows, return `NOT_FOUND`.
 6. Return `PASS`, `NOT_FOUND`, `COUNT_MISMATCH`, `DUPLICATED`, `CONTRACT_MISMATCH`, `BLOCKED`, or `QUERY_FAILED` for every requested event. A prose code review is not a valid result.
-7. When one analytics project contains multiple deployment environments, require an environment filter before querying. Never mix QA and production rows in one acceptance conclusion.
+7. When one analytics project contains multiple deployment environments, require an environment filter before querying. Never mix local, QA, and production rows in one acceptance conclusion.
 
 ### Narrow-mode examples
 
@@ -82,6 +82,7 @@ When both code and data language appear, prefer `verify-data` if the requested c
 - `$project-tracking-integrator 根据这份文档生成对应的埋点方法` → `generate-method`: locate the existing transport and nearest wrapper pattern, add the method, run a narrow static check, and stop. Do not add business call sites or query Sensors.
 - `$project-tracking-integrator 给支付成功流程加埋点` → `instrument`: implement the requested wrapper and call site, run source checks, and stop before live data verification.
 - `$project-tracking-integrator 在 QA 自动点击领取按钮并验证神策数据` → `browser-verify`: execute only the supplied browser journey, verify its visible outcome, query QA ingestion, compare the contract, and stop. Do not scan or modify the repository.
+- `$project-tracking-integrator 在本地 localhost:3000 自动点击领取按钮并验证神策数据` → `browser-verify`: derive `localhost:3000` from the browser URL, query only matching local ingestion with a required test identity, compare the contract, and stop.
 - `$project-tracking-integrator 完成埋点后用浏览器跑一遍并验收` → compose `instrument → browser-verify`: implement first, then run only the agreed QA journey and ingestion comparison. Do not append unrelated platform audits.
 - `$project-tracking-integrator 完整接入这些事件并验证神策入库` → `full-lifecycle`: run the relevant end-to-end stages.
 
@@ -135,6 +136,7 @@ Define for every business event:
 - per-target transport event, business wrapper, match selectors, property rules, and sources
 - deduplication strategy and expected count
 - runtime and ingestion evidence method
+- local, QA, and production requirement state, required evidence, and production `smokeSafe` policy when multi-environment acceptance is requested
 
 Preserve valid data-team names. Flag ambiguities instead of guessing. Resolve `unknown` from explicit requirements, repository routing policy, and reachable analogues; if it still changes implementation, report a blocking data/product decision.
 
@@ -218,7 +220,7 @@ The minimum acceptance loop is:
 2. Reuse the signed-in in-app browser session. Inspect the live DOM and validate one unique locator immediately before each action; never guess selectors from source code or screenshots.
 3. Record the start time, execute only the authorized steps, and verify the visible UI result after every trigger.
 4. Read redacted SDK console output when the application exposes it. Treat this as optional runtime evidence because the in-app browser does not expose general Network request interception.
-5. After a bounded ingestion wait, query the analytics API with the same event contract, environment hostname, short time window, stable match fields, and preferably the same `distinct_id`.
+5. After a bounded ingestion wait, query the analytics API with the same event contract, environment value, short time window, stable match fields, and the required `distinct_id`.
 6. Compare event name, properties, values, types, identity, and expected count. If the first query returns `NOT_FOUND`, permit at most one delayed re-query before concluding.
 
 The platform query is mandatory in this mode. A successful click, UI transition, or console message does not prove ingestion. Conversely, do not claim that an outgoing request was captured unless an actual SDK log or captured payload was observed.
@@ -243,14 +245,15 @@ Resolve Sensors query configuration in this order without printing secrets:
 
 The verifier discovers options 2 and 3 automatically. When any configured option is available, run the API query instead of asking the user to configure it again.
 
-When the same Sensors project receives more than one application environment, add an environment hostname filter to every live query. For ImaStudio use the common URL property shown in Sensors:
+When the same Sensors project receives more than one application environment, add an environment filter to every live query. Read [references/environment-gates.md](references/environment-gates.md) for the three-stage evidence and promotion policy. For ImaStudio use the common URL property shown in Sensors:
 
 | Verification stage | Required query condition | CLI option |
 |---|---|---|
-| QA acceptance before release | `lmweb_url` contains `qa.imastudio.com` | `--environment-host qa.imastudio.com` |
-| Production smoke check after release | `lmweb_url` contains `www.imastudio.com` | `--environment-host www.imastudio.com` |
+| Local acceptance before QA | `lmweb_url` contains the actual browser host such as `localhost:3000` | `--environment local --environment-value localhost:3000` |
+| QA acceptance before release | `lmweb_url` contains `qa.imastudio.com` | `--environment qa --environment-value qa.imastudio.com` |
+| Production smoke check after release | `lmweb_url` contains `www.imastudio.com` | `--environment production --environment-value www.imastudio.com` |
 
-The default property is `lmweb_url`; override it only when the repository/data team confirms another common URL field with `--environment-property <name>`. Keep the environment filter together with event, stable action match, short time window, and preferably a test `distinct_id`. The hostname separates environments but does not identify the individual tester.
+Use the environment value without protocol or path. Derive local values from `new URL(startUrl).host`, preserving the port. The default property is `lmweb_url`; override it only when the repository/data team confirms another common field with `--environment-property <name>`. Keep the environment filter together with event, stable action match, short time window, and a test `distinct_id` whenever the contract or environment profile requires identity. The environment value does not identify the individual tester.
 
 If the query would be too broad because both a test identity and stable selector are missing, ask only for the minimum missing filter. Do not compensate by auditing wrappers, Tracking Maps, GA/GTM, or unrelated events.
 
@@ -264,7 +267,8 @@ node <skill-dir>/scripts/verify-sensors-events.mjs \
   --query \
   --credentials <private-credentials.json> \
   --profile <profile> \
-  --environment-host <qa-or-production-hostname> \
+  --environment <local-or-qa-or-production> \
+  --environment-value <host-or-host:port-without-protocol> \
   --distinct-id <test-identity> \
   --dry-run
 ```
@@ -277,7 +281,8 @@ node <skill-dir>/scripts/verify-sensors-events.mjs \
   --query \
   --credentials <private-credentials.json> \
   --profile <profile> \
-  --environment-host <qa-or-production-hostname> \
+  --environment <local-or-qa-or-production> \
+  --environment-value <host-or-host:port-without-protocol> \
   --distinct-id <test-identity> \
   --since-minutes 30 \
   --format json \
@@ -295,8 +300,12 @@ node <skill-dir>/scripts/generate-tracking-report.mjs \
   --spec <contract.json> \
   --scan /tmp/tracking-scan.json \
   --source /tmp/tracking-source.json \
-  --runtime /tmp/tracking-runtime.json \
-  --ingestion /tmp/tracking-ingestion.json \
+  --browser /tmp/tracking-browser-local.json \
+  --ingestion /tmp/tracking-ingestion-local.json \
+  --browser /tmp/tracking-browser-qa.json \
+  --ingestion /tmp/tracking-ingestion-qa.json \
+  --browser /tmp/tracking-browser-production.json \
+  --ingestion /tmp/tracking-ingestion-production.json \
   --out /tmp/tracking-acceptance.md
 ```
 
@@ -325,6 +334,6 @@ Return only the artifact required by the selected mode. Do not pad a narrow requ
 - `browser-verify` → browser-step evidence, visible UI outcome, optional SDK console evidence, platform query comparison, and a clear final result.
 - `full-lifecycle` → scan, contract, implementation, separate evidence layers, and combined acceptance report.
 
-In full-lifecycle mode, do not declare completion until all required evidence layers agree. Code presence does not prove a reachable trigger, a successful request does not prove ingestion, and a same-named ingested event does not prove the property contract.
+In full-lifecycle mode, do not declare completion until all required evidence layers agree. For multi-environment contracts, local must pass before QA becomes ready, QA must pass before production becomes ready, and production automation may run only for events marked `smokeSafe: true`. These are readiness gates, not authorization to deploy or release. Code presence does not prove a reachable trigger, a successful request does not prove ingestion, and a same-named ingested event does not prove the property contract.
 
 For ImaStudio, `@joyme/sensors-data`, `KEWLSensors`, `ima_function_click`, `dataLayer`, `lib/track`, or `docs/tracking-map`, read [references/imastudio-pattern.md](references/imastudio-pattern.md) before modifying or validating the project.

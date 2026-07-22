@@ -14,17 +14,17 @@
 需要确认以下信息；已能从上下文或页面安全读取时不要重复询问：
 
 - 数据需求截图、表格或 Version 2 埋点契约。
-- 测试环境起始 URL。
+- local、QA 或 production 环境名和起始 URL。
 - 可安全执行的浏览器步骤和每一步的可见预期结果。
-- 环境过滤条件，例如 `qa.imastudio.com`。
-- 测试 `distinct_id`，或足够窄的稳定 match 字段与短时间窗。
+- 环境过滤值，例如 `localhost:3000` 或 `qa.imastudio.com`，不含协议和路径。
+- 契约或环境要求的测试 `distinct_id`，以及稳定 match 字段与短时间窗。
 - 已登录的测试会话；登录、OTP、验证码或 Passkey 由用户完成。
 
 对购买、支付、发布、删除、发消息、提交订单、修改线上数据等有明显外部副作用的动作，在执行前确认本次动作已获用户明确授权。优先使用 QA、沙箱和测试账号。
 
 ## 3. 可复用浏览器旅程
 
-需要重复执行时，按 [browser-journey.schema.json](browser-journey.schema.json) 保存旅程。可从 [browser-journey.example.json](browser-journey.example.json) 复制。
+需要重复执行时，按 [browser-journey.schema.json](browser-journey.schema.json) 保存 Version 2 旅程。可从 [browser-journey.example.json](browser-journey.example.json) 复制；Version 1 继续兼容。
 
 旅程文件只描述业务意图和稳定定位信息，不保存账号密码、Cookie、Token、API Key、支付信息或个人数据。敏感输入由用户在浏览器中完成。
 
@@ -53,6 +53,8 @@ node <skill-dir>/scripts/validate-browser-journey.mjs \
 ## 4. 浏览器执行规则
 
 必须使用 Codex 的 in-app Browser 能力及其现有登录会话。开始浏览器操作前先读取对应 Browser Skill 的完整说明。
+
+local 旅程开始前先检查 `startUrl` 是否可访问。不可访问时，按仓库说明启动标准开发服务并记录进程；验收结束后只关闭本次启动的服务。完整规则见 [environment-gates.md](environment-gates.md)。
 
 每一步按以下顺序执行：
 
@@ -87,15 +89,32 @@ in-app Browser 可以执行 UI 操作、读取 DOM、确认页面结果并读取
 在第一个触发动作前记录 `startedAt`。完成旅程后使用：
 
 - 相同的事件契约；
-- QA 或生产环境 hostname；
+- local、QA 或 production 环境名；
+- 从浏览器 URL 提取的 `URL.host`，例如 `localhost:3000`；
 - 测试 `distinct_id`；
 - 稳定 match 字段；
 - 覆盖 `startedAt` 的最短可行时间窗；
 - 事件期望次数；
 
-查询平台。环境域名不能替代测试身份。ImaStudio QA 使用 `lmweb_url LIKE '%qa.imastudio.com%'`；生产使用 `lmweb_url LIKE '%www.imastudio.com%'`。
+查询平台。环境值不能替代测试身份，也不能包含协议或路径。ImaStudio 使用：local `lmweb_url LIKE '%localhost:端口%'`、QA `LIKE '%qa.imastudio.com%'`、production `LIKE '%www.imastudio.com%'`。
 
 完成操作后等待一个有界的入库延迟再查询。第一次为 `NOT_FOUND` 时至多延迟重查一次；不要高频轮询神策。第二次仍无数据则保持 `NOT_FOUND`，并报告环境、身份、时间窗和 match 条件，不转去做源码审计。
+
+把浏览器证据保存为可合并的环境报告：
+
+```json
+{
+  "environment": "local",
+  "results": [
+    {
+      "id": "contract-event-id",
+      "platform": "sensors",
+      "status": "PASS",
+      "method": "in-app-browser"
+    }
+  ]
+}
+```
 
 ## 7. 结果输出
 
@@ -103,7 +122,7 @@ in-app Browser 可以执行 UI 操作、读取 DOM、确认页面结果并读取
 
 | 项目 | 结果 | 证据 |
 |---|---|---|
-| 浏览器步骤 | `PASS` / `BLOCKED` / `FAILED` | URL、控件语义和可见结果，不附敏感页面内容 |
+| 浏览器步骤 | `PASS` / `BLOCKED` / `FAILED` | 环境名、URL、控件语义和可见结果，不附敏感页面内容 |
 | SDK 发送日志 | `PASS` / `NOT_AVAILABLE` / `CONTRACT_MISMATCH` | 只记录脱敏后的事件名和字段差异 |
 | 平台入库 | `PASS` / `NOT_FOUND` / `COUNT_MISMATCH` / `DUPLICATED` / `CONTRACT_MISMATCH` / `QUERY_FAILED` | 查询条件和字段差异，不回显凭证或原始用户事件 |
 

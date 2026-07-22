@@ -127,3 +127,76 @@ test('buildReport blocks unknown targets and does not require GA ingestion by de
     assert.equal(report.results.find(result => result.platform === 'ga4').status, 'PASS');
     assert.equal(report.results.find(result => result.platform === 'google_ads').status, 'BLOCKED');
 });
+
+test('buildReport keeps local, QA, and production results independent of input order', () => {
+    const environmentContract = {
+        version: 2,
+        environments: {
+            local: { startUrl: 'http://localhost:3000', query: { property: 'lmweb_url', operator: 'contains', valueFrom: 'browser-host' } },
+            qa: { startUrl: 'https://qa.imastudio.com', query: { property: 'lmweb_url', operator: 'contains', value: 'qa.imastudio.com' } },
+            production: { startUrl: 'https://www.imastudio.com', query: { property: 'lmweb_url', operator: 'contains', value: 'www.imastudio.com' } },
+        },
+        events: [{
+            id: 'signup-click',
+            trigger: '用户点击注册按钮',
+            targets: { sensors: { status: 'required', event: 'signup_click' } },
+            validation: {
+                environments: {
+                    local: { status: 'required', evidence: ['source', 'browser', 'ingestion'] },
+                    qa: { status: 'required', evidence: ['browser', 'ingestion'] },
+                    production: { status: 'required', evidence: ['browser', 'ingestion'], smokeSafe: true },
+                },
+            },
+        }],
+    };
+    const source = { results: [{ id: 'signup-click', platform: 'sensors', status: 'PASS' }] };
+    const browser = [
+        { environment: 'local', results: [{ id: 'signup-click', platform: 'sensors', status: 'PASS' }] },
+        { environment: 'qa', results: [{ id: 'signup-click', platform: 'sensors', status: 'PASS' }] },
+        { environment: 'production', results: [{ id: 'signup-click', platform: 'sensors', status: 'PASS' }] },
+    ];
+    const ingestion = [
+        { environment: { name: 'local' }, results: [{ id: 'signup-click', status: 'PASS' }] },
+        { environment: { name: 'qa' }, results: [{ id: 'signup-click', status: 'NOT_FOUND' }] },
+        { environment: { name: 'production' }, results: [{ id: 'signup-click', status: 'PASS' }] },
+    ];
+
+    const forward = buildReport({ contract: environmentContract, source, browser, ingestion });
+    const reverse = buildReport({ contract: environmentContract, source, browser: [...browser].reverse(), ingestion: [...ingestion].reverse() });
+    const compact = report => report.results.map(result => [result.environment, result.status]);
+
+    assert.deepEqual(compact(forward), compact(reverse));
+    assert.deepEqual(compact(forward), [
+        ['local', 'PASS'],
+        ['qa', 'NOT_FOUND'],
+        ['production', 'PASS'],
+    ]);
+    assert.equal(forward.gates.local.status, 'PASS');
+    assert.equal(forward.gates.local.readiness, 'LOCAL_READY');
+    assert.equal(forward.gates.qa.status, 'FAILED');
+    assert.equal(forward.gates.production.status, 'BLOCKED');
+    assert.equal(forward.gates.production.blockedBy, 'qa');
+});
+
+test('production verification is blocked unless the event is smoke safe', () => {
+    const unsafeContract = {
+        version: 2,
+        environments: {
+            production: { startUrl: 'https://www.imastudio.com', query: { property: 'lmweb_url', operator: 'contains', value: 'www.imastudio.com' } },
+        },
+        events: [{
+            id: 'purchase',
+            trigger: '支付成功',
+            targets: { sensors: { status: 'required', event: 'purchase' } },
+            validation: {
+                environments: {
+                    production: { status: 'required', evidence: ['browser', 'ingestion'], smokeSafe: false },
+                },
+            },
+        }],
+    };
+    const evidence = { environment: 'production', results: [{ id: 'purchase', platform: 'sensors', status: 'PASS' }] };
+    const report = buildReport({ contract: unsafeContract, browser: evidence, ingestion: evidence });
+    assert.equal(report.results[0].status, 'BLOCKED');
+    assert.equal(report.gates.production.status, 'BLOCKED');
+});

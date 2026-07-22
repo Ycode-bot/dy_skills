@@ -6,6 +6,7 @@ import test from 'node:test';
 import {
     buildSensorsSql,
     compareContract,
+    enforceIdentityRequirements,
     formatDryRun,
     normalizeContract,
     normalizeCredentialDocument,
@@ -13,7 +14,9 @@ import {
     parseOpenApiRows,
     querySensorsEvent,
     resolveCredentialsFile,
+    resolveEnvironmentOptions,
     run,
+    validateEnvironmentValue,
 } from './verify-sensors-events.mjs';
 
 const contract = normalizeContract({
@@ -119,6 +122,52 @@ test('normalizeContract accepts a version 2 required Sensors target', () => {
     assert.equal(normalized.events[0].event, 'ima_function_click');
     assert.equal(normalized.events[0].maxCount, 2);
     assert.deepEqual(normalized.events[0].match, { btn_name: 'cta_click' });
+});
+
+test('environment profile derives a protocol-free local host with port', () => {
+    const options = resolveEnvironmentOptions({
+        environments: {
+            local: {
+                startUrl: 'http://localhost:3000/example',
+                identityRequired: true,
+                query: { property: 'lmweb_url', operator: 'contains', valueFrom: 'browser-host' },
+            },
+        },
+    }, {
+        query: true,
+        environment: 'local',
+        environmentValue: '',
+        environmentHost: '',
+        environmentProperty: '',
+    });
+    assert.equal(options.environmentValue, 'localhost:3000');
+    assert.equal(options.environmentProperty, 'lmweb_url');
+    assert.equal(options.environmentIdentityRequired, true);
+});
+
+test('environment value rejects protocol and accepts host with port', () => {
+    assert.doesNotThrow(() => validateEnvironmentValue('localhost:3000'));
+    assert.doesNotThrow(() => validateEnvironmentValue('127.0.0.1:3000'));
+    assert.throws(() => validateEnvironmentValue('http://localhost:3000'), /without protocol/);
+});
+
+test('required test identity blocks a live query without distinct_id', () => {
+    const identityContract = normalizeContract({
+        version: 2,
+        events: [{
+            id: 'identity-event',
+            trigger: 'click',
+            targets: { sensors: { status: 'required', event: 'identity_event' } },
+            validation: { testIdentityRequired: true },
+        }],
+    });
+    assert.throws(
+        () => enforceIdentityRequirements(identityContract, { query: true, environment: 'local', distinctId: '' }),
+        /requires --distinct-id/,
+    );
+    assert.doesNotThrow(
+        () => enforceIdentityRequirements(identityContract, { query: true, environment: 'local', distinctId: 'test-user' }),
+    );
 });
 
 test('parseOpenApiRows maps streamed columns and values into event rows', () => {
@@ -234,6 +283,15 @@ test('buildSensorsSql isolates QA and production by URL hostname', () => {
     assert.doesNotMatch(productionSql, /qa\.imastudio\.com/);
 });
 
+test('buildSensorsSql isolates localhost by host and port without protocol', () => {
+    const sql = buildSensorsSql(contract.events[0], {
+        environmentValue: 'localhost:3000',
+        environmentProperty: 'lmweb_url',
+    });
+    assert.match(sql, /`lmweb_url` LIKE '%localhost:3000%'/);
+    assert.doesNotMatch(sql, /https?:\/\//);
+});
+
 test('environment host is rejected outside live query mode', async () => {
     await assert.rejects(
         () => run([
@@ -273,8 +331,65 @@ test('dry-run prints the environment isolation condition', () => {
     }, {
         SENSORS_QUERY_API_SECRET: 'must-not-appear',
     });
-    assert.match(output, /Environment: lmweb_url contains qa\.imastudio\.com/);
+    assert.match(output, /Environment: custom; lmweb_url contains qa\.imastudio\.com/);
     assert.match(output, /`lmweb_url` LIKE '%qa\.imastudio\.com%'/);
+});
+
+test('local environment dry-run uses contract profile and selected identity end to end', async () => {
+    const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'sensors-local-environment-test-'));
+    try {
+        const spec = path.join(temporary, 'contract.json');
+        const out = path.join(temporary, 'dry-run.txt');
+        await fs.writeFile(spec, JSON.stringify({
+            version: 2,
+            environments: {
+                local: {
+                    startUrl: 'http://localhost:3000/example',
+                    identityRequired: true,
+                    query: { property: 'lmweb_url', operator: 'contains', valueFrom: 'browser-host' },
+                },
+                qa: {
+                    startUrl: 'https://qa.imastudio.com',
+                    identityRequired: true,
+                    query: { property: 'lmweb_url', operator: 'contains', value: 'qa.imastudio.com' },
+                },
+            },
+            events: [{
+                id: 'claim-click',
+                trigger: 'click',
+                targets: { sensors: { status: 'required', event: 'ima_function_click' } },
+                validation: {
+                    testIdentityRequired: true,
+                    environments: {
+                        local: { status: 'required', evidence: ['source', 'browser', 'ingestion'] },
+                    },
+                },
+            }],
+        }), 'utf8');
+        const code = await run([
+            '--spec', spec,
+            '--query',
+            '--environment', 'local',
+            '--environment-value', 'localhost:3000',
+            '--distinct-id', 'test-user',
+            '--dry-run',
+            '--out', out,
+        ], {
+            SENSORS_QUERY_BASE_URL: 'https://sensor.example.com',
+            SENSORS_QUERY_PROJECT: 'AiProduct',
+            SENSORS_QUERY_API_SECRET: 'secret-not-printed',
+        });
+        assert.equal(code, 0);
+        const output = await fs.readFile(out, 'utf8');
+        assert.match(output, /Environment: local; lmweb_url contains localhost:3000/);
+        assert.match(output, /`lmweb_url` LIKE '%localhost:3000%'/);
+        assert.match(output, /distinct_id = 'test-user'/);
+        assert.doesNotMatch(output, /secret-not-printed/);
+        assert.doesNotMatch(output, /http:\/\/localhost:3000/);
+    }
+    finally {
+        await fs.rm(temporary, { recursive: true, force: true });
+    }
 });
 
 test('querySensorsEvent calls SQL API and parses NDJSON without exposing credential', async () => {

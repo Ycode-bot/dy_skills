@@ -103,7 +103,8 @@ node scripts/verify-sensors-events.mjs \
   --query \
   --credentials /path/to/sensors-credentials.json \
   --profile prod \
-  --environment-host qa.imastudio.com \
+  --environment qa \
+  --environment-value qa.imastudio.com \
   --distinct-id "test-user-id" \
   --dry-run
 ```
@@ -114,25 +115,27 @@ Profile 会根据凭证自动选择协议：以 `#K-` 开头的 35 字符 API Ke
 
 ## 4. 同项目多环境隔离
 
-当测试环境和生产环境写入同一个神策项目时，环境过滤是验收查询的必填条件，不能把两个域名的数据混在一起比较。
+当本地、测试和生产环境写入同一个神策项目时，环境过滤是验收查询的必填条件，不能把三套数据混在一起比较。
 
 ImaStudio 当前使用公共 URL 属性区分：
 
 | 环境 | 神策筛选条件 | CLI 参数 |
 |---|---|---|
-| 测试环境 | `lmweb_url` 包含 `qa.imastudio.com` | `--environment-host qa.imastudio.com` |
-| 正式环境 | `lmweb_url` 包含 `www.imastudio.com` | `--environment-host www.imastudio.com` |
+| 本地环境 | `lmweb_url` 包含实际 host，例如 `localhost:3000` | `--environment local --environment-value localhost:3000` |
+| 测试环境 | `lmweb_url` 包含 `qa.imastudio.com` | `--environment qa --environment-value qa.imastudio.com` |
+| 正式环境 | `lmweb_url` 包含 `www.imastudio.com` | `--environment production --environment-value www.imastudio.com` |
 
-脚本默认环境属性为 `lmweb_url`，生成的 SQL 使用神策支持的字符串 `LIKE "%值%"` 包含语义。只有数据团队确认字段发生变化时才传 `--environment-property`。
+查询值不包含 `http://`、`https://` 或路径。本地值从实际浏览器地址的 `URL.host` 提取并保留端口。脚本默认环境属性为 `lmweb_url`，生成的 SQL 使用神策支持的字符串 `LIKE "%值%"` 包含语义。只有数据团队确认字段发生变化时才传 `--environment-property`。
 
-测试流程分成两次独立验收：
+测试流程分成三次独立验收：
 
-1. 发布前在 QA 域名触发事件，只查询 `qa.imastudio.com`，确认契约通过。
-2. 发布后使用生产测试账号做最小冒烟，只查询 `www.imastudio.com`，确认线上版本实际入库。
+1. 本地触发事件，只查询当前 `localhost:端口` 或 loopback host，确认后才进入 QA。
+2. 发布前在 QA 域名触发事件，只查询 `qa.imastudio.com`，确认后才进入发布流程。
+3. 发布后使用生产测试账号做最小安全冒烟，只查询 `www.imastudio.com`，确认线上版本实际入库。
 
-环境域名不能代替测试身份。仍优先同时使用 `distinct_id + 事件名 + 稳定 match 字段 + 短时间窗`，否则同一环境内其他用户的事件可能造成重复或数量误判。
+环境值不能代替测试身份。当环境或事件要求身份时，必须同时使用 `distinct_id + 事件名 + 稳定 match 字段 + 短时间窗`；缺少 `distinct_id` 返回 `BLOCKED`。
 
-如果事件没有 `lmweb_url`，或者值不包含预期域名，不能忽略环境条件继续验收；应返回 `NOT_FOUND` 或 `CONTRACT_MISMATCH`，并由数据团队确认公共属性口径。长期建议增加明确的公共属性（例如 `app_env=qa|production`），再逐步从 URL 过滤迁移到显式环境字段。
+如果事件没有 `lmweb_url`，或者值不包含预期环境值，不能忽略环境条件继续验收；应返回 `NOT_FOUND` 或 `CONTRACT_MISMATCH`，并由数据团队确认公共属性口径。长期可增加 `app_env=local|qa|production`，再逐步从 URL 过滤迁移到显式环境字段。
 
 ## 5. 事件契约
 
@@ -194,7 +197,8 @@ node scripts/verify-sensors-events.mjs \
 node scripts/verify-sensors-events.mjs \
   --spec references/tracking-contract.example.json \
   --query \
-  --environment-host qa.imastudio.com \
+  --environment local \
+  --environment-value localhost:3000 \
   --distinct-id "test-user-id" \
   --dry-run
 ```
@@ -205,7 +209,8 @@ node scripts/verify-sensors-events.mjs \
 node scripts/verify-sensors-events.mjs \
   --spec references/tracking-contract.example.json \
   --query \
-  --environment-host qa.imastudio.com \
+  --environment local \
+  --environment-value localhost:3000 \
   --distinct-id "test-user-id" \
   --since-minutes 30 \
   --out /tmp/sensors-verification.md

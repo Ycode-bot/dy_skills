@@ -4,11 +4,12 @@
   "title": "Browser tracking verification journey",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "name", "startUrl", "environmentHost", "steps", "verification"],
+  "required": ["version", "name", "startUrl", "steps", "verification"],
   "properties": {
-    "version": { "const": 1 },
+    "version": { "enum": [1, 2] },
     "name": { "type": "string", "minLength": 1 },
     "startUrl": { "type": "string", "format": "uri", "pattern": "^https?://" },
+    "environment": { "enum": ["local", "qa", "production"] },
     "environmentHost": { "type": "string", "minLength": 1 },
     "identity": {
       "type": "object",
@@ -35,6 +36,16 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": { "properties": { "version": { "const": 1 } }, "required": ["version"] },
+      "then": { "required": ["environmentHost"] }
+    },
+    {
+      "if": { "properties": { "version": { "const": 2 } }, "required": ["version"] },
+      "then": { "required": ["environment"] }
+    }
+  ],
   "$defs": {
     "locator": {
       "type": "object",

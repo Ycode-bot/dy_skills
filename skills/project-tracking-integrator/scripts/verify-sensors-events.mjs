@@ -13,6 +13,7 @@ const DEFAULT_LIMIT = 100;
 const DEFAULT_SINCE_MINUTES = 30;
 const DEFAULT_CREDENTIALS_FILE = path.join(os.homedir(), '.config', 'imastudio', 'sensors-credentials.json');
 const SENSITIVE_FIELD_PATTERN = /(token|secret|password|authorization|cookie|email|phone|mobile|account|userinfo)/i;
+const ENVIRONMENT_NAMES = new Set(['local', 'qa', 'production']);
 
 const HELP_TEXT = `Sensors Analytics event verifier
 
@@ -38,8 +39,10 @@ Query options:
   --api-key-header <name>       Header mode only; default: X-API-Key
   --since-minutes <n>           Query window; default: contract value or 30
   --distinct-id <id>            Narrow all contracts to one test identity
-  --environment-host <host>     Require URL property to contain this environment hostname
-  --environment-property <key>  URL property used for environment; default: lmweb_url
+  --environment <name>          local, qa, or production
+  --environment-value <value>   URL host substring without protocol/path; e.g. localhost:3000
+  --environment-host <host>     Compatibility alias for --environment-value
+  --environment-property <key>  Property used for environment; contract or lmweb_url
   --limit <n>                   Per-contract row limit; default 100, maximum 1000
   --timeout-ms <n>              Request timeout; default 30000
   --dry-run                     Print redacted endpoint and SQL without querying
@@ -82,8 +85,10 @@ function parseArgs(argv) {
         apiKeyHeader: '',
         sinceMinutes: undefined,
         distinctId: '',
+        environment: '',
+        environmentValue: '',
         environmentHost: '',
-        environmentProperty: 'lmweb_url',
+        environmentProperty: '',
         limit: DEFAULT_LIMIT,
         timeoutMs: 30000,
         format: 'markdown',
@@ -104,6 +109,8 @@ function parseArgs(argv) {
         '--api-key-header',
         '--since-minutes',
         '--distinct-id',
+        '--environment',
+        '--environment-value',
         '--environment-host',
         '--environment-property',
         '--limit',
@@ -145,6 +152,8 @@ function parseArgs(argv) {
             '--auth-mode': 'authMode',
             '--api-key-header': 'apiKeyHeader',
             '--distinct-id': 'distinctId',
+            '--environment': 'environment',
+            '--environment-value': 'environmentValue',
             '--environment-host': 'environmentHost',
             '--environment-property': 'environmentProperty',
             '--format': 'format',
@@ -192,15 +201,63 @@ function validateOptions(options) {
     if (!Number.isInteger(options.timeoutMs) || options.timeoutMs < 1000) {
         fail('--timeout-ms must be an integer of at least 1000');
     }
-    if (options.environmentHost) {
-        if (!options.query) {
-            fail('--environment-host is only supported with --query');
-        }
-        if (!/^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/.test(options.environmentHost)) {
-            fail('--environment-host must be a hostname without protocol, path, port, or wildcard');
-        }
-        quoteSqlIdentifier(options.environmentProperty);
+    if (options.environment && !ENVIRONMENT_NAMES.has(options.environment)) {
+        fail('--environment must be local, qa, or production');
     }
+    if (options.environmentHost && options.environmentValue && options.environmentHost !== options.environmentValue) {
+        fail('--environment-host and --environment-value must not conflict');
+    }
+    if (options.environment || options.environmentHost || options.environmentValue || options.environmentProperty) {
+        if (!options.query) {
+            fail('environment options are only supported with --query');
+        }
+    }
+}
+
+function validateEnvironmentValue(value) {
+    if (!value) return;
+    if (value.length > 253 || !/^(?:localhost|[A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])(?::\d{1,5})?$/.test(value)) {
+        fail('--environment-value must be a host or host:port without protocol, path, query, or wildcard');
+    }
+    const port = value.match(/\]:(\d+)$/)?.[1] || value.match(/^[^:]+:(\d+)$/)?.[1];
+    if (port && (Number(port) < 1 || Number(port) > 65535)) {
+        fail('--environment-value port must be between 1 and 65535');
+    }
+}
+
+function resolveEnvironmentOptions(rawContract, options) {
+    const profiles = rawContract.environments || {};
+    const profileNames = Object.keys(profiles);
+    if (options.query && profileNames.length > 1 && !options.environment) {
+        fail('--environment is required when the contract defines multiple environments');
+    }
+    const profile = options.environment ? profiles[options.environment] : null;
+    if (options.environment && profileNames.length > 0 && !profile) {
+        fail(`contract does not define environment: ${options.environment}`);
+    }
+    const query = profile?.query || {};
+    let profileValue = query.value || '';
+    if (!profileValue && query.valueFrom === 'browser-host' && profile?.startUrl) {
+        try {
+            profileValue = new URL(profile.startUrl).host;
+        }
+        catch {
+            fail(`contract environment ${options.environment}.startUrl must be a valid URL`);
+        }
+    }
+    const environmentValue = options.environmentValue || options.environmentHost || profileValue;
+    const environmentProperty = options.environmentProperty || query.property || 'lmweb_url';
+    if (options.environment && !environmentValue) {
+        fail(`environment ${options.environment} requires --environment-value or a contract query value`);
+    }
+    validateEnvironmentValue(environmentValue);
+    if (environmentValue) quoteSqlIdentifier(environmentProperty);
+    return {
+        ...options,
+        environmentValue,
+        environmentProperty,
+        environmentIdentityRequired: Boolean(profile?.identityRequired),
+    };
 }
 
 async function readJsonFile(filePath) {
@@ -349,7 +406,7 @@ async function readActualEvents(filePath) {
     return parseEventRows(raw);
 }
 
-function normalizeContract(raw) {
+function normalizeContract(raw, selectedEnvironment = '') {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
         fail('contract root must be a JSON object');
     }
@@ -370,6 +427,15 @@ function normalizeContract(raw) {
         if (!target || status !== 'required') {
             return [];
         }
+        const environmentRequirement = selectedEnvironment
+            ? event.validation?.environments?.[selectedEnvironment]
+            : null;
+        if (environmentRequirement?.status === 'unknown') {
+            fail(`event ${event.id || index + 1} environment ${selectedEnvironment} is unknown`);
+        }
+        if (['optional', 'disabled'].includes(environmentRequirement?.status)) {
+            return [];
+        }
         return [{
             index,
             source: {
@@ -379,6 +445,8 @@ function normalizeContract(raw) {
                 minCount: target.minCount ?? event.deduplication?.minCount,
                 maxCount: target.maxCount ?? event.deduplication?.maxCount,
                 sinceMinutes: target.sinceMinutes,
+                testIdentityRequired: event.validation?.testIdentityRequired === true,
+                environmentRequirement,
             },
         }];
     });
@@ -435,6 +503,8 @@ function normalizeContract(raw) {
             event: event.event,
             trigger: event.trigger || '',
             distinctId: event.distinctId || '',
+            testIdentityRequired: event.testIdentityRequired === true,
+            environmentRequirement: event.environmentRequirement || null,
             minCount,
             maxCount,
             sinceMinutes: event.sinceMinutes ?? defaults.sinceMinutes ?? DEFAULT_SINCE_MINUTES,
@@ -443,7 +513,17 @@ function normalizeContract(raw) {
         };
     });
 
-    return { version: raw.version || 1, events };
+    return { version: raw.version || 1, environments: raw.environments || {}, events };
+}
+
+function enforceIdentityRequirements(contract, options) {
+    if (!options.query) return;
+    for (const expected of contract.events) {
+        const required = options.environmentIdentityRequired || expected.testIdentityRequired;
+        if (required && !(options.distinctId || expected.distinctId)) {
+            fail(`event ${expected.id} requires --distinct-id for ${options.environment || 'live'} verification`);
+        }
+    }
 }
 
 function getEventName(row) {
@@ -678,8 +758,9 @@ function buildSensorsSql(expected, options = {}) {
     for (const [name, value] of Object.entries(expected.match || {})) {
         conditions.push(`${quoteSqlIdentifier(name)} = ${formatSqlValue(value)}`);
     }
-    if (options.environmentHost) {
-        conditions.push(`${quoteSqlIdentifier(options.environmentProperty || 'lmweb_url')} LIKE '%${escapeSqlLiteral(options.environmentHost)}%'`);
+    const environmentValue = options.environmentValue || options.environmentHost;
+    if (environmentValue) {
+        conditions.push(`${quoteSqlIdentifier(options.environmentProperty || 'lmweb_url')} LIKE '%${escapeSqlLiteral(environmentValue)}%'`);
     }
     return `SELECT * FROM events WHERE ${conditions.join(' AND ')} ORDER BY time DESC LIMIT ${options.limit || DEFAULT_LIMIT}`;
 }
@@ -826,7 +907,8 @@ async function queryAllEvents(contract, options, env = process.env) {
             distinctId: options.distinctId || expected.distinctId,
             sinceMinutes: options.sinceMinutes ?? expected.sinceMinutes,
             match: expected.match,
-            environmentHost: options.environmentHost,
+            environment: options.environment,
+            environmentValue: options.environmentValue || options.environmentHost,
             environmentProperty: options.environmentProperty,
             limit: options.limit,
         });
@@ -848,7 +930,8 @@ function formatMarkdown(report, sourceLabel) {
         `- 结果：${report.summary.passed}/${report.summary.total} 通过`,
     ];
     if (report.environment) {
-        lines.push(`- 环境过滤：\`${report.environment.property}\` 包含 \`${report.environment.host}\``);
+        lines.push(`- 验证环境：\`${report.environment.name}\``);
+        lines.push(`- 环境过滤：\`${report.environment.property}\` 包含 \`${report.environment.value}\``);
     }
     lines.push(
         '',
@@ -875,8 +958,9 @@ function formatDryRun(contract, options, env = process.env) {
     const config = resolveQueryConfig({ ...options, dryRun: true }, env);
     const lines = config.baseUrls.map(baseUrl => `Endpoint: ${makeEndpoint(config, baseUrl, true).toString()}`);
     lines.push(`Profile: ${options.credentialProfile?.name || 'environment/CLI'}`, `Auth mode: ${config.authMode}`);
-    if (options.environmentHost) {
-        lines.push(`Environment: ${options.environmentProperty || 'lmweb_url'} contains ${options.environmentHost}`);
+    const environmentValue = options.environmentValue || options.environmentHost;
+    if (environmentValue) {
+        lines.push(`Environment: ${options.environment || 'custom'}; ${options.environmentProperty || 'lmweb_url'} contains ${environmentValue}`);
     }
     lines.push('');
     for (const expected of contract.events) {
@@ -893,6 +977,9 @@ async function run(argv = process.argv.slice(2), env = process.env) {
         return 0;
     }
 
+    const rawContract = await readJsonFile(options.spec);
+    options = resolveEnvironmentOptions(rawContract, options);
+
     if (options.query) {
         options = { ...options, credentials: await resolveCredentialsFile(options, env) };
     }
@@ -904,7 +991,8 @@ async function run(argv = process.argv.slice(2), env = process.env) {
         };
     }
 
-    const contract = normalizeContract(await readJsonFile(options.spec));
+    const contract = normalizeContract(rawContract, options.environment);
+    enforceIdentityRequirements(contract, options);
     if (options.query && options.dryRun) {
         const output = formatDryRun(contract, options, env);
         if (options.out) {
@@ -921,10 +1009,12 @@ async function run(argv = process.argv.slice(2), env = process.env) {
         ? await readActualEvents(options.actual)
         : await queryAllEvents(contract, options, env);
     const report = compareContract(contract, rows, { distinctId: options.distinctId });
-    if (options.query && options.environmentHost) {
+    const environmentValue = options.environmentValue || options.environmentHost;
+    if (options.query && environmentValue) {
         report.environment = {
+            name: options.environment || 'custom',
             property: options.environmentProperty || 'lmweb_url',
-            host: options.environmentHost,
+            value: environmentValue,
         };
     }
     const output = options.format === 'json'
@@ -954,6 +1044,7 @@ if (isMain) {
 export {
     buildSensorsSql,
     compareContract,
+    enforceIdentityRequirements,
     formatDryRun,
     formatMarkdown,
     loadCredentialProfile,
@@ -964,6 +1055,8 @@ export {
     querySensorsEvent,
     redactValue,
     resolveCredentialsFile,
+    resolveEnvironmentOptions,
     resolveQueryConfig,
     run,
+    validateEnvironmentValue,
 };

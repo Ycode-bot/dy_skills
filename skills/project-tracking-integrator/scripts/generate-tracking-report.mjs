@@ -6,6 +6,9 @@ const FAILURE_STATUSES = new Set([
     'MISSING_IMPLEMENTATION', 'UNREACHABLE', 'NOT_SENT', 'NOT_FOUND', 'COUNT_MISMATCH',
     'DUPLICATED', 'CONTRACT_MISMATCH', 'QUERY_FAILED', 'FAILED',
 ]);
+const ENVIRONMENT_ORDER = ['local', 'qa', 'production'];
+const READY_STATES = { local: 'LOCAL_READY', qa: 'QA_READY', production: 'PRODUCTION_VERIFIED' };
+const EVIDENCE_STAGES = ['source', 'browser', 'runtime', 'ingestion'];
 
 const HELP = `Tracking acceptance report generator
 
@@ -14,9 +17,10 @@ Usage:
 
 Options:
   --scan <report.json>        Project scan JSON
-  --source <report.json>      Source verification JSON
-  --runtime <report.json>     Browser/SDK verification JSON
-  --ingestion <report.json>   Platform ingestion verification JSON
+  --source <report.json>      Source verification JSON; repeatable
+  --browser <report.json>     Browser journey JSON; repeatable by environment
+  --runtime <report.json>     SDK/payload verification JSON; repeatable by environment
+  --ingestion <report.json>   Platform ingestion JSON; repeatable by environment
   --format <markdown|json>    Default: markdown
   --out <path>                Write report instead of stdout
   --help                      Show this help
@@ -29,14 +33,23 @@ function usage(message) {
 }
 
 function parseArgs(argv) {
-    const options = { spec: '', scan: '', source: '', runtime: '', ingestion: '', format: 'markdown', out: '', help: false };
+    const options = {
+        spec: '', scan: '', source: [], browser: [], runtime: [], ingestion: [], format: 'markdown', out: '', help: false,
+    };
+    const repeatable = new Set(['--source', '--browser', '--runtime', '--ingestion']);
+    const single = new Set(['--spec', '--scan', '--format', '--out']);
     for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
-        if (arg === '--help') options.help = true;
-        else if (['--spec', '--scan', '--source', '--runtime', '--ingestion', '--format', '--out'].includes(arg)) {
-            options[arg.slice(2)] = argv[++index];
+        if (arg === '--help') {
+            options.help = true;
+            continue;
         }
-        else usage(`unknown argument: ${arg}`);
+        if (!repeatable.has(arg) && !single.has(arg)) usage(`unknown argument: ${arg}`);
+        const value = argv[++index];
+        if (!value || value.startsWith('--')) usage(`missing value for ${arg}`);
+        const key = arg.slice(2);
+        if (repeatable.has(arg)) options[key].push(value);
+        else options[key] = value;
     }
     if (!options.help && !options.spec) usage('--spec is required');
     if (!['markdown', 'json'].includes(options.format)) usage('--format must be markdown or json');
@@ -53,87 +66,196 @@ async function readJson(file) {
     }
 }
 
+async function readJsonList(files) {
+    return Promise.all((files || []).map(readJson));
+}
+
+function asReports(value) {
+    if (!value) return [];
+    return Array.isArray(value) ? value.filter(Boolean) : [value];
+}
+
+function defaultEvidence(platform, environment = '') {
+    if (!environment) {
+        return platform === 'sensors' ? ['source', 'runtime', 'ingestion'] : ['source', 'runtime'];
+    }
+    if (environment === 'local') return ['source', 'browser', 'ingestion'];
+    return ['browser', 'ingestion'];
+}
+
+function orderedEnvironments(contract) {
+    const names = Object.keys(contract.environments || {});
+    return names.sort((left, right) => {
+        const leftIndex = ENVIRONMENT_ORDER.indexOf(left);
+        const rightIndex = ENVIRONMENT_ORDER.indexOf(right);
+        return (leftIndex === -1 ? 99 : leftIndex) - (rightIndex === -1 ? 99 : rightIndex);
+    });
+}
+
 function contractRows(contract) {
     if (!contract || !Array.isArray(contract.events) || contract.events.length === 0) usage('contract.events must contain at least one event');
     const rows = [];
+    const environments = orderedEnvironments(contract);
     for (const [index, event] of contract.events.entries()) {
-        if (!event.targets) {
-            rows.push({
-                id: event.id || `event-${index + 1}`,
-                businessEvent: event.businessEvent || event.id || event.event,
-                trigger: event.trigger || '',
-                platform: 'sensors',
-                event: event.event,
-                targetStatus: 'required',
-                requiresIngestion: true,
-            });
-            continue;
-        }
-        for (const [platform, target] of Object.entries(event.targets)) {
-            const status = target.status || 'unknown';
-            if (!['required', 'unknown'].includes(status)) continue;
-            rows.push({
+        const targets = event.targets || { sensors: { status: 'required', event: event.event } };
+        for (const [platform, target] of Object.entries(targets)) {
+            const targetStatus = target.status || 'unknown';
+            if (!['required', 'unknown'].includes(targetStatus)) continue;
+            const base = {
                 id: event.id || `event-${index + 1}`,
                 businessEvent: event.businessEvent || event.id || target.event || '未命名事件',
                 trigger: event.trigger || '',
                 platform,
                 event: target.event || '',
-                targetStatus: status,
-                requiresIngestion: platform === 'sensors' || Boolean(target.validation?.ingestionEvidence && target.validation.ingestionEvidence !== 'none'),
-            });
+                targetStatus,
+            };
+            if (environments.length === 0) {
+                rows.push({
+                    ...base,
+                    environment: '',
+                    environmentStatus: 'required',
+                    smokeSafe: null,
+                    requiredEvidence: defaultEvidence(platform),
+                });
+                continue;
+            }
+            const requirements = event.validation?.environments || {};
+            for (const environment of environments) {
+                const requirement = requirements[environment] || { status: 'unknown', evidence: [] };
+                if (['optional', 'disabled'].includes(requirement.status)) continue;
+                rows.push({
+                    ...base,
+                    environment,
+                    environmentStatus: requirement.status || 'unknown',
+                    smokeSafe: requirement.smokeSafe ?? null,
+                    requiredEvidence: requirement.evidence?.length
+                        ? requirement.evidence
+                        : defaultEvidence(platform, environment),
+                });
+            }
         }
     }
     return rows;
 }
 
-function resultMap(report, defaultPlatform = '') {
+function environmentName(value) {
+    if (typeof value === 'string') return value;
+    if (value && typeof value === 'object') return value.name || '';
+    return '';
+}
+
+function resultMap(reportValue, defaultPlatform = '') {
     const map = new Map();
-    for (const result of report?.results || []) {
-        const platform = result.platform || defaultPlatform;
-        map.set(`${result.id}::${platform}`, result);
-        if (!platform) map.set(`${result.id}::`, result);
+    for (const report of asReports(reportValue)) {
+        const reportEnvironment = environmentName(report.environment);
+        for (const result of report?.results || []) {
+            const platform = result.platform || defaultPlatform;
+            const environment = environmentName(result.environment) || reportEnvironment;
+            map.set(`${result.id}::${platform}::${environment}`, result);
+            if (!platform) map.set(`${result.id}::::${environment}`, result);
+        }
     }
     return map;
 }
 
-function stageStatus(map, row, fallbackPlatform = '') {
-    return map.get(`${row.id}::${row.platform}`)?.status
-        || map.get(`${row.id}::${fallbackPlatform}`)?.status
-        || map.get(`${row.id}::`)?.status
-        || 'NOT_RUN';
+function stageStatus(map, row, { fallbackPlatform = '', allowGlobal = false } = {}) {
+    const environments = allowGlobal && row.environment ? [row.environment, ''] : [row.environment];
+    const platforms = fallbackPlatform && fallbackPlatform !== row.platform
+        ? [row.platform, fallbackPlatform, '']
+        : [row.platform, ''];
+    for (const environment of environments) {
+        for (const platform of platforms) {
+            const status = map.get(`${row.id}::${platform}::${environment}`)?.status;
+            if (status) return status;
+        }
+    }
+    return 'NOT_RUN';
 }
 
 function finalStatus(row) {
-    if (row.targetStatus === 'unknown') return 'BLOCKED';
-    const requiredStages = [row.source, row.runtime];
-    if (row.requiresIngestion) requiredStages.push(row.ingestion);
-    const failure = requiredStages.find(status => FAILURE_STATUSES.has(status));
+    if (row.targetStatus === 'unknown' || row.environmentStatus === 'unknown') return 'BLOCKED';
+    if (row.environment === 'production' && row.smokeSafe !== true) return 'BLOCKED';
+    const statuses = row.requiredEvidence.map(stage => row[stage]);
+    const failure = statuses.find(status => FAILURE_STATUSES.has(status));
     if (failure) return failure;
-    if (requiredStages.every(status => status === 'PASS')) return 'PASS';
+    if (statuses.length > 0 && statuses.every(status => status === 'PASS')) return 'PASS';
     return 'INCOMPLETE';
 }
 
-function buildReport({ contract, scan = null, source = null, runtime = null, ingestion = null }) {
-    const sourceMap = resultMap(source);
-    const runtimeMap = resultMap(runtime);
-    const ingestionMap = resultMap(ingestion, 'sensors');
+function ownGateStatus(results) {
+    if (results.length === 0) return 'NOT_REQUIRED';
+    const failure = results.find(result => FAILURE_STATUSES.has(result.status));
+    if (failure) return 'FAILED';
+    if (results.some(result => result.status === 'BLOCKED')) return 'BLOCKED';
+    if (results.every(result => result.status === 'PASS')) return 'PASS';
+    return 'INCOMPLETE';
+}
+
+function buildGates(results) {
+    const gates = {};
+    let previousRequired = '';
+    let previousPassed = true;
+    for (const environment of ENVIRONMENT_ORDER) {
+        const environmentResults = results.filter(result => result.environment === environment);
+        const evidenceStatus = ownGateStatus(environmentResults);
+        let status = evidenceStatus;
+        let blockedBy = '';
+        if (evidenceStatus !== 'NOT_REQUIRED' && !previousPassed) {
+            status = 'BLOCKED';
+            blockedBy = previousRequired;
+        }
+        gates[environment] = {
+            status,
+            evidenceStatus,
+            blockedBy,
+            readiness: status === 'PASS' ? READY_STATES[environment] : 'NOT_READY',
+        };
+        if (evidenceStatus !== 'NOT_REQUIRED') {
+            previousRequired = environment;
+            previousPassed = status === 'PASS';
+        }
+    }
+    return gates;
+}
+
+function buildReport({ contract, scan = null, source = null, browser = null, runtime = null, ingestion = null }) {
+    const sourceReports = asReports(source);
+    const browserReports = asReports(browser);
+    const runtimeReports = asReports(runtime);
+    const ingestionReports = asReports(ingestion);
+    const sourceMap = resultMap(sourceReports);
+    const browserMap = resultMap(browserReports);
+    const runtimeMap = resultMap(runtimeReports);
+    const ingestionMap = resultMap(ingestionReports, 'sensors');
     const results = contractRows(contract).map(row => {
         const result = {
             ...row,
-            requirement: row.targetStatus === 'unknown' ? 'BLOCKED' : 'PASS',
-            source: stageStatus(sourceMap, row),
-            runtime: stageStatus(runtimeMap, row),
-            ingestion: row.requiresIngestion ? stageStatus(ingestionMap, row, row.platform === 'sensors' ? 'sensors' : '') : 'NOT_REQUIRED',
+            requirement: row.targetStatus === 'unknown' || row.environmentStatus === 'unknown'
+                || (row.environment === 'production' && row.smokeSafe !== true)
+                ? 'BLOCKED'
+                : 'PASS',
         };
+        for (const stage of EVIDENCE_STAGES) {
+            if (!row.requiredEvidence.includes(stage)) {
+                result[stage] = 'NOT_REQUIRED';
+                continue;
+            }
+            const map = { source: sourceMap, browser: browserMap, runtime: runtimeMap, ingestion: ingestionMap }[stage];
+            result[stage] = stageStatus(map, row, {
+                fallbackPlatform: stage === 'ingestion' && row.platform === 'sensors' ? 'sensors' : '',
+                allowGlobal: stage === 'source',
+            });
+        }
         result.status = finalStatus(result);
         return result;
     });
+    const gates = orderedEnvironments(contract).length > 0 ? buildGates(results) : {};
     let status = 'PASS';
     if (results.some(result => FAILURE_STATUSES.has(result.status))) status = 'FAILED';
-    else if (results.some(result => result.status === 'BLOCKED')) status = 'BLOCKED';
-    else if (results.some(result => result.status !== 'PASS')) status = 'INCOMPLETE';
+    else if (results.some(result => result.status === 'BLOCKED') || Object.values(gates).some(gate => gate.status === 'BLOCKED')) status = 'BLOCKED';
+    else if (results.some(result => result.status !== 'PASS') || Object.values(gates).some(gate => !['PASS', 'NOT_REQUIRED'].includes(gate.status))) status = 'INCOMPLETE';
     return {
-        schemaVersion: 1,
+        schemaVersion: 2,
         generatedAt: new Date().toISOString(),
         status,
         architecture: scan ? {
@@ -148,9 +270,14 @@ function buildReport({ contract, scan = null, source = null, runtime = null, ing
             incomplete: results.filter(result => result.status === 'INCOMPLETE').length,
             blocked: results.filter(result => result.status === 'BLOCKED').length,
         },
+        gates,
         results,
         evidence: {
-            scan: Boolean(scan), source: Boolean(source), runtime: Boolean(runtime), ingestion: Boolean(ingestion),
+            scan: Boolean(scan),
+            source: sourceReports.length,
+            browser: browserReports.length,
+            runtime: runtimeReports.length,
+            ingestion: ingestionReports.length,
         },
     };
 }
@@ -161,29 +288,38 @@ function formatMarkdown(report) {
         `- 生成时间：${report.generatedAt}`,
         `- 总体状态：${report.status}`,
         `- 通过：${report.summary.passed}/${report.summary.total}`,
-        `- 证据：架构扫描=${report.evidence.scan ? '有' : '无'}，源码=${report.evidence.source ? '有' : '无'}，运行时=${report.evidence.runtime ? '有' : '无'}，入库=${report.evidence.ingestion ? '有' : '无'}`, '',
+        `- 证据：架构扫描=${report.evidence.scan ? '有' : '无'}，源码=${report.evidence.source}，浏览器=${report.evidence.browser}，运行时=${report.evidence.runtime}，入库=${report.evidence.ingestion}`, '',
     ];
+    if (Object.keys(report.gates).length > 0) {
+        lines.push('## 环境晋级门禁', '', '| 环境 | 证据状态 | 门禁状态 | 就绪状态 | 阻塞来源 |', '|---|---|---|---|---|');
+        for (const environment of ENVIRONMENT_ORDER) {
+            const gate = report.gates[environment];
+            lines.push(`| ${environment} | ${gate.evidenceStatus} | ${gate.status} | ${gate.readiness} | ${gate.blockedBy || '-'} |`);
+        }
+        lines.push('');
+    }
     if (report.architecture) {
         lines.push('## 埋点体系', '', `- 总体分类：${report.architecture.classification}`);
-        for (const [platform, status] of Object.entries(report.architecture.platforms)) {
-            if (status !== 'absent') lines.push(`- ${platform}：${status}`);
+        for (const [platform, platformStatus] of Object.entries(report.architecture.platforms)) {
+            if (platformStatus !== 'absent') lines.push(`- ${platform}：${platformStatus}`);
         }
         if (report.architecture.risks.length > 0) lines.push(`- 扫描风险：${report.architecture.risks.length} 项`);
         lines.push('');
     }
     lines.push('## 事件验收', '',
-        '| 业务事件 | 平台 | 事件 | 需求 | 源码 | 浏览器/SDK | 平台入库 | 最终结果 |',
-        '|---|---|---|---|---|---|---|---|');
+        '| 业务事件 | 平台 | 环境 | 需求 | 源码 | 浏览器 | SDK/请求 | 平台入库 | 最终结果 |',
+        '|---|---|---|---|---|---|---|---|---|');
     for (const result of report.results) {
-        lines.push(`| ${result.businessEvent} | ${result.platform} | ${result.event || '-'} | ${result.requirement} | ${result.source} | ${result.runtime} | ${result.ingestion} | ${result.status} |`);
+        lines.push(`| ${result.businessEvent} | ${result.platform} | ${result.environment || '-'} | ${result.requirement} | ${result.source} | ${result.browser} | ${result.runtime} | ${result.ingestion} | ${result.status} |`);
     }
     const incomplete = report.results.filter(result => result.status !== 'PASS');
     if (incomplete.length > 0) {
         lines.push('', '## 待处理', '');
         for (const result of incomplete) {
-            if (result.status === 'BLOCKED') lines.push(`- ${result.id}/${result.platform}：目标平台或事件定义仍为 unknown，需要数据或产品负责人确认。`);
-            else if (result.status === 'INCOMPLETE') lines.push(`- ${result.id}/${result.platform}：证据尚未收齐，不能判定交付完成。`);
-            else lines.push(`- ${result.id}/${result.platform}：${result.status}，查看对应阶段的差异报告。`);
+            const label = `${result.id}/${result.platform}/${result.environment || 'legacy'}`;
+            if (result.status === 'BLOCKED') lines.push(`- ${label}：环境要求、目标定义或 production smokeSafe 尚未满足。`);
+            else if (result.status === 'INCOMPLETE') lines.push(`- ${label}：必需证据尚未收齐。`);
+            else lines.push(`- ${label}：${result.status}，查看对应阶段的差异报告。`);
         }
     }
     lines.push('');
@@ -199,9 +335,10 @@ async function run(argv = process.argv.slice(2)) {
     const report = buildReport({
         contract: await readJson(options.spec),
         scan: await readJson(options.scan),
-        source: await readJson(options.source),
-        runtime: await readJson(options.runtime),
-        ingestion: await readJson(options.ingestion),
+        source: await readJsonList(options.source),
+        browser: await readJsonList(options.browser),
+        runtime: await readJsonList(options.runtime),
+        ingestion: await readJsonList(options.ingestion),
     });
     const output = options.format === 'json' ? `${JSON.stringify(report, null, 2)}\n` : formatMarkdown(report);
     if (options.out) {
@@ -220,4 +357,4 @@ if (isMain) {
     });
 }
 
-export { buildReport, contractRows, finalStatus, formatMarkdown, parseArgs, resultMap, run };
+export { buildGates, buildReport, contractRows, finalStatus, formatMarkdown, parseArgs, resultMap, run };

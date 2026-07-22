@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const ACTIONS = new Set(['goto', 'click', 'fill', 'select', 'press', 'expect-visible', 'expect-url']);
 const LOCATOR_TYPES = new Set(['testId', 'dataAttribute', 'href', 'role', 'label', 'placeholder', 'text', 'css']);
+const ENVIRONMENTS = new Set(['local', 'qa', 'production']);
 
 function isObject(value) {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -52,18 +53,48 @@ function validateLocator(locator, label, issues) {
     }
 }
 
+function isLocalHostname(hostname) {
+    return hostname === 'localhost'
+        || hostname === '::1'
+        || hostname === '[::1]'
+        || /^127(?:\.\d{1,3}){3}$/.test(hostname)
+        || hostname.endsWith('.local');
+}
+
+function validateEnvironment(environment, startUrl, issues) {
+    if (!ENVIRONMENTS.has(environment)) {
+        issues.push('environment must be local, qa, or production');
+        return;
+    }
+    if (!startUrl) return;
+    if (environment === 'local' && !isLocalHostname(startUrl.hostname)) {
+        issues.push('local journey must use localhost, loopback IP, or a .local hostname');
+    }
+    if (environment === 'qa' && startUrl.hostname !== 'qa.imastudio.com') {
+        issues.push('qa journey must use qa.imastudio.com');
+    }
+    if (environment === 'production' && startUrl.hostname !== 'www.imastudio.com') {
+        issues.push('production journey must use www.imastudio.com');
+    }
+}
+
 export function validateBrowserJourney(journey) {
     const issues = [];
     if (!isObject(journey)) {
         return { status: 'INVALID', issues: ['journey must be an object'] };
     }
-    if (journey.version !== 1) issues.push('version must equal 1');
+    if (![1, 2].includes(journey.version)) issues.push('version must equal 1 or 2');
     if (!nonEmpty(journey.name)) issues.push('name is required');
-    if (!nonEmpty(journey.environmentHost)) issues.push('environmentHost is required');
 
     const startUrl = requireHttpUrl(journey.startUrl, 'startUrl', issues);
-    if (startUrl && nonEmpty(journey.environmentHost) && startUrl.hostname !== journey.environmentHost) {
-        issues.push('startUrl hostname must equal environmentHost');
+    if (journey.version === 1) {
+        if (!nonEmpty(journey.environmentHost)) issues.push('environmentHost is required for version 1');
+        if (startUrl && nonEmpty(journey.environmentHost) && startUrl.hostname !== journey.environmentHost) {
+            issues.push('startUrl hostname must equal environmentHost');
+        }
+    }
+    if (journey.version === 2) {
+        validateEnvironment(journey.environment, startUrl, issues);
     }
 
     if (!Array.isArray(journey.steps) || journey.steps.length === 0) {
@@ -77,8 +108,8 @@ export function validateBrowserJourney(journey) {
             }
             if (step.action === 'goto') {
                 const url = requireHttpUrl(step.url, `${label}.url`, issues);
-                if (url && nonEmpty(journey.environmentHost) && url.hostname !== journey.environmentHost) {
-                    issues.push(`${label}.url hostname must equal environmentHost`);
+                if (url && startUrl && url.origin !== startUrl.origin) {
+                    issues.push(`${label}.url origin must equal startUrl origin`);
                 }
             }
             if (['click', 'fill', 'select', 'press', 'expect-visible'].includes(step.action)) {
@@ -116,6 +147,8 @@ export function validateBrowserJourney(journey) {
     return {
         status: issues.length === 0 ? 'PASS' : 'INVALID',
         name: journey.name ?? null,
+        environment: journey.environment || null,
+        environmentValue: startUrl?.host || null,
         stepCount: Array.isArray(journey.steps) ? journey.steps.length : 0,
         issues,
     };
