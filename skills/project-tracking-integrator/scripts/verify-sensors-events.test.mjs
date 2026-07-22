@@ -6,8 +6,6 @@ import test from 'node:test';
 import {
     buildSensorsSql,
     compareContract,
-    discoverDistinctIdentity,
-    enforceIdentityRequirements,
     formatDryRun,
     normalizeContract,
     normalizeCredentialDocument,
@@ -130,7 +128,6 @@ test('environment profile derives a protocol-free local host with port', () => {
         environments: {
             local: {
                 startUrl: 'http://localhost:3000/example',
-                identityRequired: true,
                 query: { property: 'lmweb_url', operator: 'contains', valueFrom: 'browser-host' },
             },
         },
@@ -143,99 +140,12 @@ test('environment profile derives a protocol-free local host with port', () => {
     });
     assert.equal(options.environmentValue, 'localhost:3000');
     assert.equal(options.environmentProperty, 'lmweb_url');
-    assert.equal(options.environmentIdentityRequired, true);
 });
 
 test('environment value rejects protocol and accepts host with port', () => {
     assert.doesNotThrow(() => validateEnvironmentValue('localhost:3000'));
     assert.doesNotThrow(() => validateEnvironmentValue('127.0.0.1:3000'));
     assert.throws(() => validateEnvironmentValue('http://localhost:3000'), /without protocol/);
-});
-
-test('required test identity accepts explicit identity or bounded discovery', () => {
-    const identityContract = normalizeContract({
-        version: 2,
-        events: [{
-            id: 'identity-event',
-            trigger: 'click',
-            targets: {
-                sensors: {
-                    status: 'required',
-                    event: 'identity_event',
-                    match: { btn_name: 'identity_click' },
-                },
-            },
-            validation: { testIdentityRequired: true },
-        }],
-    });
-    assert.throws(
-        () => enforceIdentityRequirements(identityContract, { query: true, environment: 'local', distinctId: '' }),
-        /requires --distinct-id or --discover-identity/,
-    );
-    assert.doesNotThrow(
-        () => enforceIdentityRequirements(identityContract, { query: true, environment: 'local', distinctId: 'test-user' }),
-    );
-    const discovered = enforceIdentityRequirements(identityContract, {
-        query: true,
-        environment: 'local',
-        environmentValue: 'localhost:3001',
-        distinctId: '',
-        discoverIdentity: true,
-        limit: 100,
-    });
-    assert.equal(discovered.sinceMinutes, 5);
-    assert.equal(discovered.limit, 20);
-});
-
-test('bounded identity discovery requires environment and stable match', () => {
-    assert.throws(
-        () => enforceIdentityRequirements(contract, {
-            query: true,
-            discoverIdentity: true,
-            environmentValue: '',
-        }),
-        /requires an environment filter/,
-    );
-    const noMatchContract = normalizeContract({
-        events: [{ id: 'no-match', event: 'ima_function_click' }],
-    });
-    assert.throws(
-        () => enforceIdentityRequirements(noMatchContract, {
-            query: true,
-            discoverIdentity: true,
-            environmentValue: 'localhost:3001',
-        }),
-        /requires a stable match field/,
-    );
-});
-
-test('bounded identity discovery resolves exactly one identity without exposing alternatives', () => {
-    const resolved = discoverDistinctIdentity(contract, [{
-        event: 'ima_function_click',
-        distinct_id: 'local-test-user',
-        btn_name: 'discount_popup_claim_click',
-    }]);
-    assert.equal(resolved.status, 'RESOLVED');
-    assert.equal(resolved.distinctId, 'local-test-user');
-    assert.equal(resolved.distinctIdCount, 1);
-
-    const ambiguous = discoverDistinctIdentity(contract, [
-        { event: 'ima_function_click', distinct_id: 'user-a', btn_name: 'discount_popup_claim_click' },
-        { event: 'ima_function_click', distinct_id: 'user-b', btn_name: 'discount_popup_claim_click' },
-    ]);
-    assert.equal(ambiguous.status, 'AMBIGUOUS');
-    assert.equal(ambiguous.distinctId, '');
-    assert.equal(ambiguous.distinctIdCount, 2);
-});
-
-test('bounded identity discovery distinguishes no rows from rows missing identity', () => {
-    assert.equal(discoverDistinctIdentity(contract, []).status, 'NOT_FOUND');
-    const unavailable = discoverDistinctIdentity(contract, [{
-        event: 'ima_function_click',
-        btn_name: 'discount_popup_claim_click',
-    }]);
-    assert.equal(unavailable.status, 'UNAVAILABLE');
-    assert.equal(unavailable.missingIdentityCount, 1);
 });
 
 test('parseOpenApiRows maps streamed columns and values into event rows', () => {
@@ -403,7 +313,7 @@ test('dry-run prints the environment isolation condition', () => {
     assert.match(output, /`lmweb_url` LIKE '%qa\.imastudio\.com%'/);
 });
 
-test('local environment dry-run uses contract profile and selected identity end to end', async () => {
+test('local environment dry-run does not require a distinct_id', async () => {
     const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'sensors-local-environment-test-'));
     try {
         const spec = path.join(temporary, 'contract.json');
@@ -413,12 +323,10 @@ test('local environment dry-run uses contract profile and selected identity end 
             environments: {
                 local: {
                     startUrl: 'http://localhost:3000/example',
-                    identityRequired: true,
                     query: { property: 'lmweb_url', operator: 'contains', valueFrom: 'browser-host' },
                 },
                 qa: {
                     startUrl: 'https://qa.imastudio.com',
-                    identityRequired: true,
                     query: { property: 'lmweb_url', operator: 'contains', value: 'qa.imastudio.com' },
                 },
             },
@@ -427,7 +335,6 @@ test('local environment dry-run uses contract profile and selected identity end 
                 trigger: 'click',
                 targets: { sensors: { status: 'required', event: 'ima_function_click' } },
                 validation: {
-                    testIdentityRequired: true,
                     environments: {
                         local: { status: 'required', evidence: ['source', 'browser', 'ingestion'] },
                     },
@@ -439,7 +346,6 @@ test('local environment dry-run uses contract profile and selected identity end 
             '--query',
             '--environment', 'local',
             '--environment-value', 'localhost:3000',
-            '--distinct-id', 'test-user',
             '--dry-run',
             '--out', out,
         ], {
@@ -451,7 +357,7 @@ test('local environment dry-run uses contract profile and selected identity end 
         const output = await fs.readFile(out, 'utf8');
         assert.match(output, /Environment: local; lmweb_url contains localhost:3000/);
         assert.match(output, /`lmweb_url` LIKE '%localhost:3000%'/);
-        assert.match(output, /distinct_id = 'test-user'/);
+        assert.doesNotMatch(output, /distinct_id\s*=/);
         assert.doesNotMatch(output, /secret-not-printed/);
         assert.doesNotMatch(output, /http:\/\/localhost:3000/);
     }
@@ -460,8 +366,8 @@ test('local environment dry-run uses contract profile and selected identity end 
     }
 });
 
-test('bounded identity discovery queries, resolves one identity, and redacts it from the report', async () => {
-    const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'sensors-identity-discovery-test-'));
+test('live query accepts anonymous Sensors rows without filtering or validating distinct_id', async () => {
+    const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'sensors-anonymous-query-test-'));
     const originalFetch = globalThis.fetch;
     try {
         const spec = path.join(temporary, 'contract.json');
@@ -472,7 +378,6 @@ test('bounded identity discovery queries, resolves one identity, and redacts it 
             environments: {
                 local: {
                     startUrl: 'http://localhost:3001/zh/community',
-                    identityRequired: true,
                     query: { property: 'lmweb_url', operator: 'contains', valueFrom: 'browser-host' },
                 },
             },
@@ -491,7 +396,6 @@ test('bounded identity discovery queries, resolves one identity, and redacts it 
                         },
                     },
                 },
-                validation: { testIdentityRequired: true },
             }],
         }), 'utf8');
         await fs.writeFile(credentials, JSON.stringify({
@@ -508,7 +412,6 @@ test('bounded identity discovery queries, resolves one identity, and redacts it 
         globalThis.fetch = async (_url, init) => {
             const sql = String(init.body);
             assert.match(sql, /localhost%3A3001|localhost:3001/);
-            assert.match(sql, /LIMIT(?:\+|%20)20|LIMIT 20/);
             assert.doesNotMatch(sql, /distinct_id\s*%3D|distinct_id\s*=/);
             return new Response(JSON.stringify({
                 event: 'ima_function_click',
@@ -525,15 +428,14 @@ test('bounded identity discovery queries, resolves one identity, and redacts it 
             '--credentials', credentials,
             '--environment', 'local',
             '--environment-value', 'localhost:3001',
-            '--discover-identity',
             '--format', 'json',
             '--out', out,
         ]);
         assert.equal(code, 0);
         const output = await fs.readFile(out, 'utf8');
         const report = JSON.parse(output);
-        assert.equal(report.identity.status, 'RESOLVED');
         assert.equal(report.results[0].status, 'PASS');
+        assert.equal(report.identity, undefined);
         assert.doesNotMatch(output, /anonymous-local-user-123/);
     }
     finally {

@@ -38,8 +38,7 @@ Query options:
   --auth-mode <mode>            token-query, openapi, bearer, or header
   --api-key-header <name>       Header mode only; default: X-API-Key
   --since-minutes <n>           Query window; default: contract value or 30
-  --distinct-id <id>            Narrow all contracts to one test identity
-  --discover-identity           Resolve one identity from a bounded event/match/environment query
+  --distinct-id <id>            Optional extra filter for one known test identity
   --environment <name>          local, qa, or production
   --environment-value <value>   URL host substring without protocol/path; e.g. localhost:3000
   --environment-host <host>     Compatibility alias for --environment-value
@@ -86,7 +85,6 @@ function parseArgs(argv) {
         apiKeyHeader: '',
         sinceMinutes: undefined,
         distinctId: '',
-        discoverIdentity: false,
         environment: '',
         environmentValue: '',
         environmentHost: '',
@@ -133,10 +131,6 @@ function parseArgs(argv) {
         }
         if (arg === '--dry-run') {
             options.dryRun = true;
-            continue;
-        }
-        if (arg === '--discover-identity') {
-            options.discoverIdentity = true;
             continue;
         }
         if (!valueOptions.has(arg)) {
@@ -213,12 +207,6 @@ function validateOptions(options) {
     if (options.environmentHost && options.environmentValue && options.environmentHost !== options.environmentValue) {
         fail('--environment-host and --environment-value must not conflict');
     }
-    if (options.discoverIdentity && !options.query) {
-        fail('--discover-identity is only supported with --query');
-    }
-    if (options.discoverIdentity && options.distinctId) {
-        fail('--discover-identity cannot be combined with --distinct-id');
-    }
     if (options.environment || options.environmentHost || options.environmentValue || options.environmentProperty) {
         if (!options.query) {
             fail('environment options are only supported with --query');
@@ -268,7 +256,6 @@ function resolveEnvironmentOptions(rawContract, options) {
         ...options,
         environmentValue,
         environmentProperty,
-        environmentIdentityRequired: Boolean(profile?.identityRequired),
     };
 }
 
@@ -457,7 +444,6 @@ function normalizeContract(raw, selectedEnvironment = '') {
                 minCount: target.minCount ?? event.deduplication?.minCount,
                 maxCount: target.maxCount ?? event.deduplication?.maxCount,
                 sinceMinutes: target.sinceMinutes,
-                testIdentityRequired: event.validation?.testIdentityRequired === true,
                 environmentRequirement,
             },
         }];
@@ -515,7 +501,6 @@ function normalizeContract(raw, selectedEnvironment = '') {
             event: event.event,
             trigger: event.trigger || '',
             distinctId: event.distinctId || '',
-            testIdentityRequired: event.testIdentityRequired === true,
             environmentRequirement: event.environmentRequirement || null,
             minCount,
             maxCount,
@@ -526,37 +511,6 @@ function normalizeContract(raw, selectedEnvironment = '') {
     });
 
     return { version: raw.version || 1, environments: raw.environments || {}, events };
-}
-
-function enforceIdentityRequirements(contract, options) {
-    if (!options.query) return options;
-    const missingRequiredIdentity = contract.events.some(expected => {
-        const required = options.environmentIdentityRequired || expected.testIdentityRequired;
-        return required && !(options.distinctId || expected.distinctId);
-    });
-    if (!missingRequiredIdentity && !options.discoverIdentity) {
-        return options;
-    }
-    if (!options.discoverIdentity) {
-        const expected = contract.events.find(event => {
-            const required = options.environmentIdentityRequired || event.testIdentityRequired;
-            return required && !(options.distinctId || event.distinctId);
-        });
-        fail(`event ${expected.id} requires --distinct-id or --discover-identity for ${options.environment || 'live'} verification`);
-    }
-    if (!options.environmentValue) {
-        fail('--discover-identity requires an environment filter');
-    }
-    for (const expected of contract.events) {
-        if (Object.keys(expected.match || {}).length === 0) {
-            fail(`event ${expected.id} requires a stable match field for --discover-identity`);
-        }
-    }
-    return {
-        ...options,
-        sinceMinutes: Math.min(options.sinceMinutes ?? 5, 10),
-        limit: Math.min(options.limit || 20, 20),
-    };
 }
 
 function getEventName(row) {
@@ -730,75 +684,6 @@ function compareContract(contract, rows, options = {}) {
             passed: results.filter(result => result.status === 'PASS').length,
             failed: results.filter(result => result.status !== 'PASS').length,
         },
-        results,
-    };
-}
-
-function discoverDistinctIdentity(contract, rows) {
-    const distinctIds = new Set();
-    let candidateCount = 0;
-    let missingIdentityCount = 0;
-    for (const row of rows) {
-        const matchesContract = contract.events.some(expected => (
-            getEventName(row) === expected.event
-            && Object.entries(expected.match).every(([name, value]) => isDeepStrictEqual(getProperty(row, name), value))
-        ));
-        if (!matchesContract) continue;
-        candidateCount += 1;
-        const distinctId = getDistinctId(row);
-        if (distinctId === undefined || distinctId === null || String(distinctId) === '') {
-            missingIdentityCount += 1;
-        }
-        else {
-            distinctIds.add(String(distinctId));
-        }
-    }
-    if (candidateCount === 0) {
-        return { status: 'NOT_FOUND', distinctId: '', candidateCount, distinctIdCount: 0 };
-    }
-    if (missingIdentityCount > 0) {
-        return {
-            status: 'UNAVAILABLE',
-            distinctId: '',
-            candidateCount,
-            distinctIdCount: distinctIds.size,
-            missingIdentityCount,
-        };
-    }
-    if (distinctIds.size === 1) {
-        return {
-            status: 'RESOLVED',
-            distinctId: [...distinctIds][0],
-            candidateCount,
-            distinctIdCount: 1,
-        };
-    }
-    return {
-        status: 'AMBIGUOUS',
-        distinctId: '',
-        candidateCount,
-        distinctIdCount: distinctIds.size,
-    };
-}
-
-function buildIdentityBlockedReport(contract, identity) {
-    const code = identity.status === 'AMBIGUOUS' ? 'IDENTITY_AMBIGUOUS' : 'IDENTITY_UNAVAILABLE';
-    const message = identity.status === 'AMBIGUOUS'
-        ? `受限查询命中 ${identity.distinctIdCount} 个测试身份，无法唯一关联本次浏览器操作`
-        : '受限查询结果缺少 distinct_id，无法唯一关联本次浏览器操作';
-    const results = contract.events.map(expected => ({
-        id: expected.id,
-        event: expected.event,
-        trigger: expected.trigger,
-        status: 'BLOCKED',
-        candidateCount: identity.candidateCount,
-        passingCount: 0,
-        expectedCount: { min: expected.minCount, max: expected.maxCount },
-        issues: [{ code, message }],
-    }));
-    return {
-        generatedAt: new Date().toISOString(),
-        summary: { total: results.length, passed: 0, failed: results.length },
         results,
     };
 }
@@ -1036,9 +921,6 @@ function formatMarkdown(report, sourceLabel) {
         lines.push(`- 验证环境：\`${report.environment.name}\``);
         lines.push(`- 环境过滤：\`${report.environment.property}\` 包含 \`${report.environment.value}\``);
     }
-    if (report.identity?.mode === 'discovery') {
-        lines.push(`- 身份关联：受限发现（${report.identity.status}，候选 ${report.identity.candidateCount} 条）`);
-    }
     lines.push(
         '',
         '| 契约 | 事件 | 状态 | 候选条数 | 通过条数 |',
@@ -1067,9 +949,6 @@ function formatDryRun(contract, options, env = process.env) {
     const environmentValue = options.environmentValue || options.environmentHost;
     if (environmentValue) {
         lines.push(`Environment: ${options.environment || 'custom'}; ${options.environmentProperty || 'lmweb_url'} contains ${environmentValue}`);
-    }
-    if (options.discoverIdentity) {
-        lines.push(`Identity: bounded discovery; window ${options.sinceMinutes} minutes; limit ${options.limit}`);
     }
     lines.push('');
     for (const expected of contract.events) {
@@ -1101,7 +980,6 @@ async function run(argv = process.argv.slice(2), env = process.env) {
     }
 
     const contract = normalizeContract(rawContract, options.environment);
-    options = enforceIdentityRequirements(contract, options);
     if (options.query && options.dryRun) {
         const output = formatDryRun(contract, options, env);
         if (options.out) {
@@ -1117,22 +995,7 @@ async function run(argv = process.argv.slice(2), env = process.env) {
     const rows = options.actual
         ? await readActualEvents(options.actual)
         : await queryAllEvents(contract, options, env);
-    let report;
-    if (options.query && options.discoverIdentity) {
-        const identity = discoverDistinctIdentity(contract, rows);
-        report = ['AMBIGUOUS', 'UNAVAILABLE'].includes(identity.status)
-            ? buildIdentityBlockedReport(contract, identity)
-            : compareContract(contract, rows, { distinctId: identity.distinctId });
-        report.identity = {
-            mode: 'discovery',
-            status: identity.status,
-            candidateCount: identity.candidateCount,
-            distinctIdCount: identity.distinctIdCount,
-        };
-    }
-    else {
-        report = compareContract(contract, rows, { distinctId: options.distinctId });
-    }
+    const report = compareContract(contract, rows, { distinctId: options.distinctId });
     const environmentValue = options.environmentValue || options.environmentHost;
     if (options.query && environmentValue) {
         report.environment = {
@@ -1168,8 +1031,6 @@ if (isMain) {
 export {
     buildSensorsSql,
     compareContract,
-    discoverDistinctIdentity,
-    enforceIdentityRequirements,
     formatDryRun,
     formatMarkdown,
     loadCredentialProfile,

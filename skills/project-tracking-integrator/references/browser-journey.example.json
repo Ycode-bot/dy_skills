@@ -3,9 +3,6 @@
   "name": "qa-discount-popup-claim",
   "startUrl": "https://qa.imastudio.com/example",
   "environment": "qa",
-  "identity": {
-    "distinctId": "${TEST_DISTINCT_ID}"
-  },
   "steps": [
     {
       "action": "goto",

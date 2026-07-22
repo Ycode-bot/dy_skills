@@ -5,7 +5,7 @@
 `browser-verify` 用于用户明确要求“让浏览器执行测试步骤并验证埋点”的场景。它连接两类证据：
 
 1. 浏览器确实完成了指定业务操作，页面出现了预期结果。
-2. 分析平台查询到了与同一契约、环境和测试身份匹配的入库事件。
+2. 分析平台查询到了与同一契约、环境、稳定字段和触发时间匹配的入库事件。
 
 这个模式不自动扫描仓库、不修改源码，也不补做 GA/GTM 等无关平台审计。若用户同时要求实现和自动验收，按 `instrument → browser-verify` 组合执行。
 
@@ -17,7 +17,7 @@
 - local、QA 或 production 环境名和起始 URL。
 - 可安全执行的浏览器步骤和每一步的可见预期结果。
 - 环境过滤值，例如 `localhost:3000` 或 `qa.imastudio.com`，不含协议和路径。
-- 已知时使用契约或环境要求的测试 `distinct_id`；无法从浏览器安全读取时必须有稳定 match 字段，才能使用受限身份发现。
+- 精确事件名、稳定 match 字段和覆盖浏览器触发时刻的短时间窗。
 - 已登录的测试会话；登录、OTP、验证码或 Passkey 由用户完成。
 
 对购买、支付、发布、删除、发消息、提交订单、修改线上数据等有明显外部副作用的动作，在执行前确认本次动作已获用户明确授权。优先使用 QA、沙箱和测试账号。
@@ -92,29 +92,22 @@ in-app Browser 可以执行 UI 操作、读取 DOM、确认页面结果并读取
 
 如果团队需要验证精确的发送请求体，优先让应用在 QA 环境为统一 track wrapper 增加可关闭、脱敏的 debug 输出，或由用户提供 DevTools/代理捕获的 JSON。不能把普通控制台消息描述成 Network 抓包。
 
-## 6. 时间、身份和环境关联
+## 6. 时间和环境关联
 
 在第一个触发动作前记录 `startedAt`。完成旅程后使用：
 
 - 相同的事件契约；
 - local、QA 或 production 环境名；
 - 从浏览器 URL 提取的 `URL.host`，例如 `localhost:3000`；
-- 已知的测试 `distinct_id`，或受限身份发现；
 - 稳定 match 字段；
 - 覆盖 `startedAt` 的最短可行时间窗；
 - 事件期望次数；
 
-查询平台。环境值不能替代测试身份，也不能包含协议或路径。ImaStudio 使用：local `lmweb_url LIKE '%localhost:端口%'`、QA `LIKE '%qa.imastudio.com%'`、production `LIKE '%www.imastudio.com%'`。
+查询平台。环境值不能包含协议或路径。ImaStudio 使用：local `lmweb_url LIKE '%localhost:端口%'`、QA `LIKE '%qa.imastudio.com%'`、production `LIKE '%www.imastudio.com%'`。
 
-优先使用已知 `distinct_id`。若浏览器运行环境无法读取 SDK identity，不要因 `window.KEWLSensors` 不可见而停止，改用验证器的 `--discover-identity`：
+不要为了验收提前获取、发现或强制匹配 `distinct_id`。神策会为游客和登录用户的事件写入该字段，但浏览器验收默认按环境、精确事件名、稳定 match 和触发时间窗定位数据。只有用户明确要求核对某个已知身份时，才额外传 `--distinct-id`。不要读取 Cookie、localStorage 或浏览器凭证来恢复身份。
 
-- 必须同时具备环境过滤、精确事件名、至少一个稳定 match 字段和触发后的短时间窗；
-- 查询窗口自动限制为最多 10 分钟，每个契约查询最多返回 20 条；推荐显式使用 `--since-minutes 5 --limit 20`；
-- 恰好命中一个 `distinct_id` 时，用该身份完成字段和次数比较，但报告不输出原值；
-- 没有候选事件返回 `NOT_FOUND`；多个身份或候选事件缺少身份才返回 `BLOCKED`；
-- 不读取 Cookie、localStorage 或浏览器凭证来恢复身份。
-
-完成操作后等待一个有界的入库延迟再查询。第一次为 `NOT_FOUND` 时至多延迟重查一次；不要高频轮询神策。第二次仍无数据则保持 `NOT_FOUND`，并报告环境、身份、时间窗和 match 条件，不转去做源码审计。
+完成操作后等待一个有界的入库延迟再查询。第一次为 `NOT_FOUND` 时至多延迟重查一次；不要高频轮询神策。第二次仍无数据则保持 `NOT_FOUND`，并报告环境、时间窗和 match 条件，不转去做源码审计。
 
 把浏览器证据保存为可合并的环境报告：
 
@@ -140,6 +133,6 @@ in-app Browser 可以执行 UI 操作、读取 DOM、确认页面结果并读取
 |---|---|---|
 | 浏览器步骤 | `PASS` / `BLOCKED` / `FAILED` | 环境名、URL、控件语义和可见结果，不附敏感页面内容 |
 | SDK 发送日志 | `PASS` / `NOT_AVAILABLE` / `NOT_SENT` / `CONTRACT_MISMATCH` | 全局对象不可见为 `NOT_AVAILABLE`；只有真实捕获面存在但缺少事件才是 `NOT_SENT` |
-| 平台入库 | `PASS` / `NOT_FOUND` / `COUNT_MISMATCH` / `DUPLICATED` / `CONTRACT_MISMATCH` / `QUERY_FAILED` | 查询条件和字段差异，不回显凭证或原始用户事件 |
+| 平台入库 | `PASS` / `NOT_FOUND` / `COUNT_MISMATCH` / `DUPLICATED` / `CONTRACT_MISMATCH` / `QUERY_FAILED` | 按环境、事件、稳定 match 和触发时间查询；不强制身份过滤 |
 
 只有浏览器旅程达到预期且平台入库契约通过时，`browser-verify` 才能返回最终 `PASS`。控制台日志未提供时可标记 `NOT_AVAILABLE`，但不能因此跳过平台查询。

@@ -57,9 +57,6 @@
           "format": "uri",
           "pattern": "^https?://"
         },
-        "identityRequired": {
-          "type": "boolean"
-        },
         "query": {
           "type": "object",
           "required": ["property", "operator"],
@@ -139,7 +136,6 @@
         "validation": {
           "type": "object",
           "properties": {
-            "testIdentityRequired": { "type": "boolean" },
             "environments": {
               "type": "object",
               "propertyNames": {

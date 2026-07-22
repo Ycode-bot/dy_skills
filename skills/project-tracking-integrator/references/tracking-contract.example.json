@@ -9,7 +9,6 @@
   "environments": {
     "local": {
       "startUrl": "http://localhost:3000",
-      "identityRequired": true,
       "query": {
         "property": "lmweb_url",
         "operator": "contains",
@@ -18,7 +17,6 @@
     },
     "qa": {
       "startUrl": "https://qa.imastudio.com",
-      "identityRequired": true,
       "query": {
         "property": "lmweb_url",
         "operator": "contains",
@@ -27,7 +25,6 @@
     },
     "production": {
       "startUrl": "https://www.imastudio.com",
-      "identityRequired": true,
       "query": {
         "property": "lmweb_url",
         "operator": "contains",
@@ -88,7 +85,6 @@
         }
       },
       "validation": {
-        "testIdentityRequired": true,
         "environments": {
           "local": {
             "status": "required",

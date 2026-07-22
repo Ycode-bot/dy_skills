@@ -17,7 +17,7 @@ Use this as a project-specific reference, not as a universal default.
 
 Do not introduce direct `window.KEWLSensors.track` calls in feature code. Add or update a typed `trackXxx` wrapper and call it from the trigger owner.
 
-Do not use an automation-side `window.KEWLSensors === undefined` result as proof that this client plugin failed. Browser extensions and automation surfaces may evaluate in an isolated JavaScript world that cannot see page-owned globals. After the app is interactive, treat an unreadable handle as `NOT_AVAILABLE`, continue the authorized trigger, and verify ingestion with the environment-isolated Sensors query. Use bounded identity discovery when the SDK identity is not observable.
+Do not use an automation-side `window.KEWLSensors === undefined` result as proof that this client plugin failed. Browser extensions and automation surfaces may evaluate in an isolated JavaScript world that cannot see page-owned globals. After the app is interactive, treat an unreadable handle as `NOT_AVAILABLE`, continue the authorized trigger, and verify ingestion with the environment-isolated Sensors query. Do not require SDK identity discovery for this verification.
 
 Do not assume every ImaStudio event is dual reported. Treat Sensors and Google targets independently. A business event may be Sensors-only, GA/GTM-only, or explicitly dual-targeted. For dual-target events, keep one business trigger, call the established wrappers for both targets, and preserve their distinct schemas.
 
@@ -127,6 +127,6 @@ Example for `trackDiscountOfferClaim`:
 }
 ```
 
-Filter live verification with a test `distinct_id`, a short time window, and the test environment's confirmed Sensors query project. Update the tracking-map status only after the query succeeds and the returned event satisfies the contract. Record query failure separately from zero matching events.
+Filter live verification with the event name, stable match fields, a short time window, and the test environment's confirmed Sensors query project. Use `distinct_id` only as an optional extra filter when the user explicitly requests a known identity. Update the tracking-map status only after the query succeeds and the returned event satisfies the contract. Record query failure separately from zero matching events.
 
-Because ImaStudio local, QA, and production currently share the same Sensors project, every live verification query must also filter the common URL property. Use the actual browser host such as `localhost:3000` for local, `qa.imastudio.com` before release, and `www.imastudio.com` for the post-release smoke check. Query values never include protocol or path. The verifier maps this to `lmweb_url LIKE '%<host-or-host:port>%'`. Do not combine environments in one count, and do not treat the environment value as a replacement for the test `distinct_id`.
+Because ImaStudio local, QA, and production currently share the same Sensors project, every live verification query must also filter the common URL property. Use the actual browser host such as `localhost:3000` for local, `qa.imastudio.com` before release, and `www.imastudio.com` for the post-release smoke check. Query values never include protocol or path. The verifier maps this to `lmweb_url LIKE '%<host-or-host:port>%'`. Do not combine environments in one count.
