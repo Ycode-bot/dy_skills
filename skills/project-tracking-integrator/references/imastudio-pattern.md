@@ -17,6 +17,8 @@ Use this as a project-specific reference, not as a universal default.
 
 Do not introduce direct `window.KEWLSensors.track` calls in feature code. Add or update a typed `trackXxx` wrapper and call it from the trigger owner.
 
+Do not use an automation-side `window.KEWLSensors === undefined` result as proof that this client plugin failed. Browser extensions and automation surfaces may evaluate in an isolated JavaScript world that cannot see page-owned globals. After the app is interactive, treat an unreadable handle as `NOT_AVAILABLE`, continue the authorized trigger, and verify ingestion with the environment-isolated Sensors query. Use bounded identity discovery when the SDK identity is not observable.
+
 Do not assume every ImaStudio event is dual reported. Treat Sensors and Google targets independently. A business event may be Sensors-only, GA/GTM-only, or explicitly dual-targeted. For dual-target events, keep one business trigger, call the established wrappers for both targets, and preserve their distinct schemas.
 
 ## Semantic policy

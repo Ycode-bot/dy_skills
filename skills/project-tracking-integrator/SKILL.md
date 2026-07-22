@@ -82,7 +82,7 @@ When both code and data language appear, prefer `verify-data` if the requested c
 - `$project-tracking-integrator 根据这份文档生成对应的埋点方法` → `generate-method`: locate the existing transport and nearest wrapper pattern, add the method, run a narrow static check, and stop. Do not add business call sites or query Sensors.
 - `$project-tracking-integrator 给支付成功流程加埋点` → `instrument`: implement the requested wrapper and call site, run source checks, and stop before live data verification.
 - `$project-tracking-integrator 在 QA 自动点击领取按钮并验证神策数据` → `browser-verify`: execute only the supplied browser journey, verify its visible outcome, query QA ingestion, compare the contract, and stop. Do not scan or modify the repository.
-- `$project-tracking-integrator 在本地 localhost:3000 自动点击领取按钮并验证神策数据` → `browser-verify`: derive `localhost:3000` from the browser URL, query only matching local ingestion with a required test identity, compare the contract, and stop.
+- `$project-tracking-integrator 在本地 localhost:3000 自动点击领取按钮并验证神策数据` → `browser-verify`: derive `localhost:3000` from the browser URL, prefer the supplied test identity and otherwise use bounded identity discovery, query only matching local ingestion, compare the contract, and stop.
 - `$project-tracking-integrator 完成埋点后用浏览器跑一遍并验收` → compose `instrument → browser-verify`: implement first, then run only the agreed QA journey and ingestion comparison. Do not append unrelated platform audits.
 - `$project-tracking-integrator 完整接入这些事件并验证神策入库` → `full-lifecycle`: run the relevant end-to-end stages.
 
@@ -216,16 +216,18 @@ Use `browser-verify` only when the user asks Codex to operate the browser. Read 
 
 The minimum acceptance loop is:
 
-1. Normalize the supplied screenshot/document into a contract and resolve the target environment, start URL, test identity, and browser journey.
+1. Normalize the supplied screenshot/document into a contract and resolve the target environment, start URL, browser journey, and test identity when already available.
 2. Reuse the signed-in in-app browser session. Inspect the live DOM and validate one unique locator immediately before each action; never guess selectors from source code or screenshots.
-3. Record the start time, execute only the authorized steps, and verify the visible UI result after every trigger.
-4. Read redacted SDK console output when the application exposes it. Treat this as optional runtime evidence because the in-app browser does not expose general Network request interception.
-5. After a bounded ingestion wait, query the analytics API with the same event contract, environment value, short time window, stable match fields, and the required `distinct_id`.
+3. Wait for a stable route and interactive application state, record the start time, execute only the authorized steps, and verify the visible UI result after every trigger.
+4. Read redacted SDK console output when the application exposes it. Treat this as optional runtime evidence because browser automation may execute JavaScript in an isolated world and the in-app browser does not expose general Network request interception.
+5. After a bounded ingestion wait, query the analytics API with the same event contract, environment value, short time window, stable match fields, and either the known `distinct_id` or guarded `--discover-identity` mode.
 6. Compare event name, properties, values, types, identity, and expected count. If the first query returns `NOT_FOUND`, permit at most one delayed re-query before concluding.
 
 The platform query is mandatory in this mode. A successful click, UI transition, or console message does not prove ingestion. Conversely, do not claim that an outgoing request was captured unless an actual SDK log or captured payload was observed.
 
-Return `BLOCKED` with only the missing input when the start URL, safe test journey, environment filter, contract, authentication state, or sufficiently narrow identity/match filter is unavailable. Hand CAPTCHA, OTP, passkeys, and account login to the user; never inspect cookies or browser storage to recover credentials.
+Never use `window.<sdk> === undefined` as proof that initialization or sending failed. First confirm the page route is stable and the application is interactive; then check the SDK only in the page's main execution world when the Browser surface supports it. An isolated-world or unavailable global handle is `NOT_AVAILABLE`, not `NOT_SENT`, and must not skip the platform query. Use `NOT_SENT` only when an actual captured request/debug payload proves the expected event was absent.
+
+Return `BLOCKED` with only the missing input when the start URL, safe test journey, environment filter, contract, authentication state, or sufficiently narrow identity/match filter is unavailable. A missing SDK global is not itself a blocker. Hand CAPTCHA, OTP, passkeys, and account login to the user; never inspect cookies or browser storage to recover credentials.
 
 ## Capability: Verify platform ingestion
 
@@ -253,7 +255,7 @@ When the same Sensors project receives more than one application environment, ad
 | QA acceptance before release | `lmweb_url` contains `qa.imastudio.com` | `--environment qa --environment-value qa.imastudio.com` |
 | Production smoke check after release | `lmweb_url` contains `www.imastudio.com` | `--environment production --environment-value www.imastudio.com` |
 
-Use the environment value without protocol or path. Derive local values from `new URL(startUrl).host`, preserving the port. The default property is `lmweb_url`; override it only when the repository/data team confirms another common field with `--environment-property <name>`. Keep the environment filter together with event, stable action match, short time window, and a test `distinct_id` whenever the contract or environment profile requires identity. The environment value does not identify the individual tester.
+Use the environment value without protocol or path. Derive local values from `new URL(startUrl).host`, preserving the port. The default property is `lmweb_url`; override it only when the repository/data team confirms another common field with `--environment-property <name>`. Keep the environment filter together with event, stable action match, short time window, and a test `distinct_id` whenever available. If an identity-required browser run cannot observe the ID, use `--discover-identity`; the verifier clamps each contract query to at most 10 minutes and 20 rows, requires environment plus stable match fields, and accepts only one discovered identity. Multiple or missing identities return `BLOCKED`. The environment value does not identify the individual tester.
 
 If the query would be too broad because both a test identity and stable selector are missing, ask only for the minimum missing filter. Do not compensate by auditing wrappers, Tracking Maps, GA/GTM, or unrelated events.
 
@@ -272,6 +274,24 @@ node <skill-dir>/scripts/verify-sensors-events.mjs \
   --distinct-id <test-identity> \
   --dry-run
 ```
+
+When the browser's isolated execution context cannot read the SDK identity, preview a bounded discovery query instead of stopping:
+
+```bash
+node <skill-dir>/scripts/verify-sensors-events.mjs \
+  --spec <contract.json> \
+  --query \
+  --credentials <private-credentials.json> \
+  --profile <profile> \
+  --environment local \
+  --environment-value localhost:3001 \
+  --discover-identity \
+  --since-minutes 5 \
+  --limit 20 \
+  --dry-run
+```
+
+After reviewing the SQL, run the same command without `--dry-run` and add `--format json --out <report.json>`.
 
 Then run the bounded read-only query and retain only the JSON difference report:
 
@@ -315,7 +335,7 @@ Interpret final states consistently:
 - `INCOMPLETE`: one or more evidence layers were not run.
 - `BLOCKED`: a required routing or contract decision remains unknown.
 - `MISSING_IMPLEMENTATION` / `UNREACHABLE`: static implementation is absent or not credibly called.
-- `NOT_SENT`: runtime payload was not observed.
+- `NOT_SENT`: an actual capture/debug surface was available and the expected runtime payload was absent; an unreadable SDK global is only `NOT_AVAILABLE`.
 - `NOT_FOUND`: the query succeeded but no matching ingested event was found.
 - `COUNT_MISMATCH` / `DUPLICATED` / `CONTRACT_MISMATCH`: count or schema differs.
 - `QUERY_FAILED`: endpoint, credential, permission, timeout, or API execution failed.

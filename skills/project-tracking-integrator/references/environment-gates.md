@@ -25,7 +25,7 @@ ImaStudio 当前使用 `lmweb_url` 的包含条件：
 - `production`：`browser + ingestion`，并要求事件标记 `smokeSafe: true`。
 - `runtime`：只有实际 SDK debug 日志或捕获 payload 时才要求；不要把普通页面成功当作发送证据。
 
-每个环境查询都使用环境值、事件名、稳定 match、短时间窗和测试 `distinct_id`。当环境或事件声明 `identityRequired/testIdentityRequired` 时，缺少 `distinct_id` 必须返回 `BLOCKED`。
+每个环境查询都使用环境值、事件名、稳定 match、短时间窗和测试 `distinct_id`。当环境或事件声明 `identityRequired/testIdentityRequired` 但浏览器隔离上下文无法读取 ID 时，可以使用受限身份发现：每个契约查询最多 10 分钟、20 条结果，并且只能命中一个 `distinct_id`。多个身份或缺少身份才返回 `BLOCKED`；SDK 全局对象不可见本身不构成门禁失败。
 
 ## 3. 晋级规则
 
