@@ -11,15 +11,17 @@ Treat tracking as a set of composable capabilities, not a mandatory checklist. R
 
 For narrower requests, stop as soon as the requested outcome is complete. Do not run downstream stages merely because the Skill supports them.
 
-## 0. Check for Skill updates
+## 0. Update only when requested
 
-At the beginning of every invocation, before scanning the target project, run one update command when Python 3 is available. For a normal request, use the cached check:
+Do not run the updater during ordinary tracking work. Do not mention update status, inspect `.update-state.json`, or contact GitHub unless the user explicitly asks to update, refresh, or check this Skill.
+
+For an explicit update/check request, use the cached command by default:
 
 ```bash
 python3 <skill-dir>/scripts/self_update.py --dest <skill-dir>
 ```
 
-When the user explicitly asks to update, refresh, check the latest version, or bypass the cache, run this command instead of the normal command:
+Only when the user explicitly says to force the update, bypass the cache, or re-download now, run:
 
 ```bash
 python3 <skill-dir>/scripts/self_update.py --dest <skill-dir> --force
@@ -33,11 +35,11 @@ Interpret the exit code as follows:
 - `2`: the installed Skill changed, or `--check-only` found an update. After installation, re-read the updated `SKILL.md` and continue without running the updater again; after `--check-only`, report availability without claiming installation.
 - `1`: the network or update failed; warn briefly and continue with the local version.
 
-The updater stores non-secret timing, revision, and installed-tree digest state in `.update-state.json`. Normal invocations use the cached result for 24 hours without contacting the network. When due, the updater first checks the latest Git commit that changed `skills/project-tracking-integrator`; it downloads the repository archive only when that revision differs, when no trusted local revision exists, or when the installed files drift from their recorded digest. Failed checks wait one hour before another automatic attempt. An explicit `--force` always bypasses the cache and verifies installed-file integrity.
+The updater stores non-secret timing, revision, and installed-tree digest state in `.update-state.json`. Explicit non-forced checks reuse a fresh result for 24 hours without contacting the network. When due, the updater first checks the latest Git commit that changed `skills/project-tracking-integrator`; it downloads the repository archive only when that revision differs, when no trusted local revision exists, or when installed files drift from their recorded digest. Failed checks use a one-hour retry cache. An explicit `--force` bypasses the cache and verifies installed-file integrity.
 
 When a download is required, the updater validates the remote Skill, compares a complete file-tree digest, and replaces the installed directory atomically. It preserves local runtime directories, refuses to overwrite a Git working tree by default, and treats update failure as non-blocking.
 
-Set `PROJECT_TRACKING_INTEGRATOR_AUTO_UPDATE=0` to disable one run. Configure the normal interval with `PROJECT_TRACKING_INTEGRATOR_UPDATE_INTERVAL_HOURS` and failed-check retry delay with `PROJECT_TRACKING_INTEGRATOR_UPDATE_RETRY_HOURS`. Set `PROJECT_TRACKING_INTEGRATOR_FORCE_UPDATE=1` as the environment-variable equivalent of `--force`. Override the trusted source or branch only when explicitly requested with `PROJECT_TRACKING_INTEGRATOR_SKILL_SOURCE=owner/repo@project-tracking-integrator` or `PROJECT_TRACKING_INTEGRATOR_UPDATE_REF=<ref>`.
+Configure the explicit-check cache with `PROJECT_TRACKING_INTEGRATOR_UPDATE_INTERVAL_HOURS` and the failed-check retry delay with `PROJECT_TRACKING_INTEGRATOR_UPDATE_RETRY_HOURS`. Set `PROJECT_TRACKING_INTEGRATOR_FORCE_UPDATE=1` only as the environment-variable equivalent of an explicitly requested `--force`. Override the trusted source or branch only when explicitly requested with `PROJECT_TRACKING_INTEGRATOR_SKILL_SOURCE=owner/repo@project-tracking-integrator` or `PROJECT_TRACKING_INTEGRATOR_UPDATE_REF=<ref>`.
 
 ## 1. Route by user intent before using project tools
 
@@ -152,7 +154,9 @@ Define for every business event:
 
 Preserve valid data-team names. Flag ambiguities instead of guessing. Resolve `unknown` from explicit requirements, repository routing policy, and reachable analogues; if it still changes implementation, report a blocking data/product decision.
 
-For Sensors events that share a generic name such as `ima_function_click`, always add a stable `match` discriminator such as `btn_name`.
+Treat columns or text labeled “示例”, “属性值示例”, “例如”, “如”, or “参考值” as non-normative illustrations. Use them only to understand shape, type, or formatting. Do not copy an illustrative value into `match`, `equals`, `oneOf`, `pattern`, a browser assertion, or an implementation constant. Add a value constraint only when the requirement explicitly labels it as fixed, required, enumerated, mapped, or expected for the current test case. Product users do not need to know code-level position numbering; verify an illustrative position field by required presence and declared type unless a binding rule is supplied elsewhere.
+
+For Sensors events that share a generic name such as `ima_function_click`, add a stable `match` discriminator only when its value comes from an explicit binding rule, the current test case, or the triggered UI element. Never invent one from an example column. If no trustworthy discriminator exists, use the shortest trigger time window and report candidate ambiguity rather than pretending the example identifies the action.
 
 ## Capability: Build or extend the implementation
 
@@ -248,10 +252,10 @@ Return `BLOCKED` with only the missing input when the start URL, safe test journ
 
 In `verify-data` and the ingestion portion of `browser-verify`, do not begin with repository discovery. Follow this minimal path:
 
-1. Transcribe only the requested events, match selectors, properties, expected values, and count constraints from the supplied screenshot/document into a temporary contract.
+1. Transcribe only the requested events, properties, binding value rules, and count constraints from the supplied screenshot/document into a temporary contract. Keep example values out of binding rules.
 2. Use the specified platform and configured read-only credential. Do not infer additional targets.
 3. Query candidate rows in the shortest practical time window using only the event name and environment.
-4. Associate same-name candidates locally with stable `match` fields, then require every matched candidate to satisfy expected fields, types, values, enums, and counts.
+4. Associate same-name candidates locally only with a stable discriminator explicitly supplied as a binding rule, a current test-case value, or an observed identifier tied to the triggered UI element. Never use a documentation example as `match`. Then require every matched candidate to satisfy required fields, declared types, binding values/enums, and counts.
 5. Return a compact per-event result table plus any query limitation, then stop.
 
 Resolve Sensors query configuration in this order without printing secrets:
@@ -304,7 +308,7 @@ node <skill-dir>/scripts/verify-sensors-events.mjs \
   --out /tmp/tracking-ingestion.json
 ```
 
-Represent every document-declared field through the normal property contract and ignore platform-returned fields that the document does not declare. Keep `QUERY_FAILED` distinct from `NOT_FOUND`. HTTP, timeout, permission, OpenAPI, or SQL failures must produce one sanitized `QUERY_FAILED` result for each affected contract event and still write the requested report. A result set that reaches `--limit` is truncated and must remain `QUERY_FAILED` until the time window is narrowed or the limit is safely increased. Check project, environment, time window, ingestion delay, credential, endpoint, and permission before concluding that an event is absent.
+Represent every document-declared field through the normal property contract and ignore platform-returned fields that the document does not declare. For a field whose only documented value is an example, validate presence and declared type but accept any actual value of that type. Keep `QUERY_FAILED` distinct from `NOT_FOUND`. HTTP, timeout, permission, OpenAPI, or SQL failures must produce one sanitized `QUERY_FAILED` result for each affected contract event and still write the requested report. A result set that reaches `--limit` is truncated and must remain `QUERY_FAILED` until the time window is narrowed or the limit is safely increased. Check project, environment, time window, ingestion delay, credential, endpoint, and permission before concluding that an event is absent.
 
 ## Capability: Generate the final acceptance report
 

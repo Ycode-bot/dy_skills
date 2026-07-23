@@ -67,9 +67,16 @@ Disable auto-update for a run:
 ACTIVITY_CMS_PSD_AUTO_UPDATE=0 ./activity-cms-psd "/path/to/activity.psd" --out "/path/to/activity-output"
 ```
 
-`project-tracking-integrator` reads a local update cache at the beginning of every invocation. By default it contacts GitHub at most once every 24 hours, checks the latest commit for that Skill path, and verifies the recorded installed-tree digest. It downloads the repository when the revision changed, the trusted revision is missing, or installed files drifted. Installed copies update atomically and continue with the latest instructions; Git working trees are never overwritten by default. Failed checks wait one hour before retrying and do not block the local workflow.
+`project-tracking-integrator` does not check for updates during ordinary tracking work. When the user explicitly asks to update or check the Skill, it reuses a fresh local result for 24 hours, then checks the latest commit for that Skill path and verifies the installed-tree digest. It downloads only when the revision changed, trusted state is missing, or installed files drifted. Installed copies update atomically; Git working trees are never overwritten by default.
 
-Force an immediate update check:
+Run an explicit cached update check:
+
+```bash
+python3 ~/.agents/skills/project-tracking-integrator/scripts/self_update.py \
+  --dest ~/.agents/skills/project-tracking-integrator
+```
+
+Force an immediate re-check only when required:
 
 ```bash
 python3 ~/.agents/skills/project-tracking-integrator/scripts/self_update.py \
@@ -77,16 +84,10 @@ python3 ~/.agents/skills/project-tracking-integrator/scripts/self_update.py \
   --force
 ```
 
-Change the automatic interval:
+Change the explicit-check cache interval:
 
 ```bash
 export PROJECT_TRACKING_INTEGRATOR_UPDATE_INTERVAL_HOURS=24
-```
-
-Disable its auto-update for one invocation:
-
-```bash
-PROJECT_TRACKING_INTEGRATOR_AUTO_UPDATE=0 codex
 ```
 
 Browser-driven tracking acceptance requires the Codex `Browser` plugin (`browser:control-in-app-browser`). If it is unavailable, install or enable **Browser (OpenAI bundled)** from the Codex plugin panel and reopen the task before running `browser-verify`.

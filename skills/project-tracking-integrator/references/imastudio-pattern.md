@@ -97,7 +97,7 @@ For Google-targeted events, also verify the exact `dataLayer` payload or `gtag` 
 
 ImaStudio's client configuration uses a Sensors `server_url` ending in `/sa?project=AiProduct`. Treat it only as the ingestion endpoint. Do not derive `/api/sql/query`, API_SECRET, or query permissions from it.
 
-For post-release QA, read [sensors-verification.md](sensors-verification.md), normalize the relevant tracking-map row into a contract, and run `scripts/verify-sensors-events.mjs`. Because most business actions share `ima_function_click`, set `match.btn_name` for every contract. Add another stable selector only when the data requirement needs it.
+For post-release QA, read [sensors-verification.md](sensors-verification.md), normalize the relevant tracking-map row into a contract, and run `scripts/verify-sensors-events.mjs`. Because most business actions share `ima_function_click`, use the tracking map's binding `btn_name` as `match.btn_name` when it is explicitly defined. Do not substitute an “属性值示例” for that binding. Add another stable selector only when an explicit requirement or the current test case provides it.
 
 Example for `trackDiscountOfferClaim`:
 
