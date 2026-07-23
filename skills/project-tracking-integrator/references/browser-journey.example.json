@@ -1,31 +1,57 @@
 {
-  "version": 2,
+  "version": 3,
   "name": "qa-discount-popup-claim",
   "startUrl": "https://qa.imastudio.com/example",
   "environment": "qa",
   "steps": [
     {
+      "id": "open-example-page",
       "action": "goto",
       "url": "https://qa.imastudio.com/example"
     },
     {
+      "id": "show-discount-offer",
+      "action": "scroll-into-view",
+      "locator": {
+        "type": "testId",
+        "value": "discount-offer"
+      },
+      "covers": ["discount-offer-show"],
+      "expect": {
+        "type": "visibleElement",
+        "locator": {
+          "type": "testId",
+          "value": "discount-offer"
+        }
+      }
+    },
+    {
+      "id": "open-discount-popup",
       "action": "click",
       "locator": {
         "type": "testId",
         "value": "open-discount-popup"
       },
+      "covers": ["discount-popup-open-click"],
       "expect": {
         "type": "visibleText",
         "value": "领取优惠"
       }
     },
     {
+      "id": "claim-discount",
       "action": "click",
       "locator": {
         "type": "role",
         "role": "button",
-        "name": "领取优惠"
+        "name": "领取优惠",
+        "exact": true,
+        "scope": {
+          "type": "testId",
+          "value": "discount-popup"
+        }
       },
+      "covers": ["discount-claim-click"],
       "expect": {
         "type": "visibleText",
         "value": "领取成功"
@@ -34,8 +60,8 @@
   ],
   "verification": {
     "contract": "./tracking-contract.json",
-    "sinceMinutes": 10,
-    "ingestionWaitSeconds": 15,
+    "ingestionWaitSeconds": 240,
+    "retryWaitSeconds": 240,
     "maxQueryAttempts": 2,
     "consolePattern": "sensors|track"
   }

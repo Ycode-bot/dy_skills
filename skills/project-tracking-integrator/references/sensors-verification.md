@@ -226,18 +226,18 @@ node scripts/verify-sensors-events.mjs \
   --out /tmp/sensors-verification.md
 ```
 
-浏览器自动验收不要使用查询时刻向前计算的相对窗口。把浏览器动作前后记录的固定区间保存到浏览器报告，然后查询：
+浏览器自动验收不要使用查询时刻向前计算的相对窗口。默认使用 Version 3 单 bundle 和统一 runner，让它校验浏览器证据、等待入库并最多条件重查一次：
 
 ```bash
-node scripts/verify-sensors-events.mjs \
-  --spec contract.json \
-  --query \
-  --browser-report /tmp/browser-report.json \
-  --format json \
-  --out /tmp/sensors-verification.json
+node scripts/run-browser-ingestion-verification.mjs \
+  --session <prepared-session-directory>
 ```
 
-浏览器报告必须包含 `environment`、`environmentProperty`、`environmentValue` 以及 `triggerWindow.startedAt`、`triggerWindow.finishedAt`。验证器把两端转成固定 SQL 时间条件；入库延迟后的唯一一次重查仍复用同一报告，不能重新计算“最近 1 分钟/2 分钟”。对于没有浏览器报告的纯数据查询，才使用 `--since-minutes`。
+浏览器报告必须包含环境字段、固定 `triggerWindow`、逐步 locator 唯一性证据和事件覆盖结果。runner 默认等待 240 秒初查；仅在结果由 `PASS`/`NOT_FOUND` 组成且至少包含一个 `NOT_FOUND` 时延迟重查一次。两次查询复用同一报告和同一 SQL 时间边界，不能重新计算“最近 1 分钟/2 分钟”，也不能重新触发浏览器动作。对于没有浏览器报告的纯数据查询，才使用 `--since-minutes`。
+
+该 runner 只验收当前环境中 required 的神策目标，Journey 的 `covers` 也只能引用这些目标。契约若还包含 required 的 GA4、GTM 或 Google Ads 目标，或 `covers` 指向当前环境会被跳过的神策目标，会返回 `BLOCKED`，避免把神策通过误写成全平台通过；需要改用对应平台的独立验证流程。
+
+`verify-sensors-events.mjs --browser-report` 仍是 runner 内部使用的确定性单次查询接口；日常 `browser-verify` 不要手工调用两遍，也不要手工创建多份 ingestion report。
 
 浏览器能够完成业务动作、但页面全局 SDK handle 在自动化上下文中不可见时，不要判定 `NOT_SENT`，也不要跳过查询。直接按环境、事件和覆盖该动作的时间窗获取候选数据，再在本地用稳定 `match` 关联业务动作。
 

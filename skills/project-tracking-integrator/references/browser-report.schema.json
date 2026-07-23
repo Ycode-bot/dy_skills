@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/project-tracking-integrator/browser-report.schema.json",
+  "title": "Browser tracking verification report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "journeyName",
+    "environment",
+    "environmentProperty",
+    "environmentValue",
+    "triggerWindow",
+    "steps",
+    "results"
+  ],
+  "properties": {
+    "version": { "const": 3 },
+    "journeyName": { "type": "string", "minLength": 1 },
+    "environment": { "enum": ["local", "qa", "production"] },
+    "environmentProperty": { "type": "string", "minLength": 1 },
+    "environmentValue": { "type": "string", "minLength": 1 },
+    "triggerWindow": { "$ref": "#/$defs/triggerWindow" },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/step" }
+    },
+    "results": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/result" }
+    }
+  },
+  "$defs": {
+    "triggerWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startedAt", "finishedAt"],
+      "properties": {
+        "startedAt": { "type": "string", "format": "date-time" },
+        "finishedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "locator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "enum": ["testId", "dataAttribute", "href", "role", "label", "placeholder", "text", "css"]
+        },
+        "value": { "type": "string", "minLength": 1 },
+        "role": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "attribute": { "type": "string", "minLength": 1 },
+        "exact": { "type": "boolean" },
+        "scope": { "$ref": "#/$defs/locator" }
+      }
+    },
+    "resolvedElement": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "role": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "href": { "type": "string", "minLength": 1 },
+        "scope": { "type": "string", "minLength": 1 }
+      }
+    },
+    "expectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["visibleText", "visibleElement", "url", "attribute", "selected"] },
+        "status": { "enum": ["PASS", "FAILED", "BLOCKED"] },
+        "value": { "type": ["string", "boolean"] },
+        "locator": { "$ref": "#/$defs/locator" },
+        "attribute": { "type": "string", "minLength": 1 }
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "action", "status", "locator", "matchCount", "executedAt"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "action": {
+          "enum": ["goto", "click", "hover", "fill", "select", "press", "scroll-into-view", "expect-visible", "expect-url"]
+        },
+        "status": { "enum": ["PASS", "FAILED", "BLOCKED"] },
+        "locator": {
+          "oneOf": [
+            { "$ref": "#/$defs/locator" },
+            { "type": "null" }
+          ]
+        },
+        "matchCount": {
+          "oneOf": [
+            { "type": "integer", "minimum": 0 },
+            { "type": "null" }
+          ]
+        },
+        "resolvedAt": { "type": "string", "format": "date-time" },
+        "executedAt": { "type": "string", "format": "date-time" },
+        "resolvedElement": { "$ref": "#/$defs/resolvedElement" },
+        "expectation": { "$ref": "#/$defs/expectation" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "enum": ["click", "hover", "fill", "select", "press", "scroll-into-view", "expect-visible"]
+              }
+            },
+            "required": ["action"]
+          },
+          "then": {
+            "required": ["resolvedAt", "resolvedElement"],
+            "properties": {
+              "locator": { "$ref": "#/$defs/locator" },
+              "matchCount": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "action": { "enum": ["click", "hover"] }
+            },
+            "required": ["action"]
+          },
+          "then": {
+            "required": ["expectation"],
+            "properties": {
+              "expectation": {
+                "required": ["status"],
+                "properties": { "status": { "const": "PASS" } }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "status": { "const": "PASS" } },
+            "required": ["status"]
+          },
+          "then": {
+            "if": {
+              "properties": {
+                "action": {
+                  "enum": ["click", "hover", "fill", "select", "press", "scroll-into-view", "expect-visible"]
+                }
+              },
+              "required": ["action"]
+            },
+            "then": { "properties": { "matchCount": { "const": 1 } } }
+          }
+        }
+      ]
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "platform": { "type": "string", "minLength": 1 },
+        "status": {
+          "enum": ["PASS", "FAILED", "BLOCKED", "NOT_AVAILABLE", "NOT_SENT", "CONTRACT_MISMATCH"]
+        },
+        "method": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

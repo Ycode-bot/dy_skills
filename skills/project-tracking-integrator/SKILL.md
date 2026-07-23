@@ -234,15 +234,17 @@ Before any browser action, require the Codex [@Browser](plugin://browser@openai-
 
 The minimum acceptance loop is:
 
-1. Normalize the supplied screenshot/document into a contract and resolve the target environment, start URL, and browser journey.
-2. Run `validate-browser-journey.mjs` before opening or operating the browser. For production, the validator must load the referenced contract, match the production origin, and confirm every required production event is explicitly `smokeSafe: true`; an invalid preflight means `BLOCKED` and zero browser actions.
-3. Reuse the signed-in in-app browser session. Inspect the live DOM and validate one unique locator immediately before each action; never guess selectors from source code or screenshots.
-4. Wait for a stable route and interactive application state, record `triggerWindow.startedAt` before the first trigger and `triggerWindow.finishedAt` after the last visible outcome, execute only the authorized steps, and save both timestamps in the browser report.
-5. Read redacted SDK console output when the application exposes it. Treat this as optional runtime evidence because browser automation may execute JavaScript in an isolated world and the in-app browser does not expose general Network request interception.
-6. After a bounded ingestion wait, pass the saved browser report to `verify-sensors-events.mjs --browser-report <browser-report.json>`. This freezes the exact trigger window for the first query and retry; never recompute a moving `--since-minutes` window from the later query time. Apply stable match fields locally before strict contract comparison.
-7. Compare event name, properties, values, types, and expected count. If the first query returns `NOT_FOUND`, permit at most one delayed re-query before concluding.
+1. Run `run-browser-ingestion-verification.mjs --prepare` and keep the contract, Version 3 journey, and browser report in its single `verification-bundle.json`. Do not create separate user-visible per-run JSON files.
+2. Run `validate-browser-journey.mjs --bundle <verification-bundle.json>` before opening or operating the browser. For production, the validator must match the production origin and confirm every event with any required target plus every explicitly covered event is `smokeSafe: true`; an invalid preflight means `BLOCKED` and zero browser actions.
+3. Reuse the signed-in in-app browser session. Immediately before every locator action, inspect the fresh DOM, apply any stable parent `scope`, and require exactly one match. Reject positional CSS and never use `.first()` to hide ambiguity. Resolve `href` locators and URL postconditions against `startUrl`; block cross-origin and non-HTTP(S) navigation before any click.
+4. Execute the authorized Version 3 steps. Use `scroll-into-view` for internal-scroll exposure triggers and `hover` for controls revealed on hover. Every `click`/`hover` needs a declared postcondition, and each triggering step maps to contract event ids through `covers`.
+5. Record `triggerWindow.startedAt` before the first trigger and `triggerWindow.finishedAt` after the last visible outcome. Every report step records `executedAt` after its action and postcondition complete; every locator step also records the locator, `matchCount`, fresh `resolvedAt`, resolved role/name/href/scope, and full postcondition result. A step with `covers` must have both timestamps inside the fixed window, and the next locator must resolve after the previous step completed. Then run `validate-browser-report.mjs --bundle <verification-bundle.json>`.
+6. Read redacted SDK console output when the application exposes it. Treat this as optional runtime evidence because browser automation may execute JavaScript in an isolated world and the in-app browser does not expose general Network request interception.
+7. Run `run-browser-ingestion-verification.mjs --session <prepared-session-directory>`. It waits for ingestion, queries with the fixed browser trigger window, applies stable match fields locally, and performs at most one conditional delayed re-query without repeating browser actions.
 
-The platform query is mandatory in this mode. A successful click, UI transition, or console message does not prove ingestion. Conversely, do not claim that an outgoing request was captured unless an actual SDK log or captured payload was observed.
+The bundled ingestion runner verifies required Sensors targets only, so every event named by `covers` must also be a required Sensors target in the selected environment. If the contract contains another required target such as GA4, GTM, or Google Ads, or a covered event that the Sensors verifier would skip, it returns `BLOCKED` instead of claiming an all-platform `PASS`; run the target-specific verifier or narrow the requested contract first.
+
+The platform query is mandatory in this mode. A successful click, UI transition, or console message does not prove ingestion. Conversely, do not claim that an outgoing request was captured unless an actual SDK log or captured payload was observed. Default Version 3 waits are 240 seconds before the first query and 240 seconds before the only retry; allow bounded overrides up to 1800 seconds. Retry only when at least one result is `NOT_FOUND` and every other result is `PASS` or `NOT_FOUND`. Stop immediately on contract, count, truncation, permission, SQL, network, or credential failures.
 
 Never use `window.<sdk> === undefined` as proof that initialization or sending failed. First confirm the page route is stable and the application is interactive; then check the SDK only in the page's main execution world when the Browser surface supports it. An isolated-world or unavailable global handle is `NOT_AVAILABLE`, not `NOT_SENT`, and must not skip the platform query. Use `NOT_SENT` only when an actual captured request/debug payload proves the expected event was absent.
 
@@ -308,18 +310,14 @@ node <skill-dir>/scripts/verify-sensors-events.mjs \
   --out /tmp/tracking-ingestion.json
 ```
 
-For `browser-verify`, use the browser report instead of a relative window:
+For `browser-verify`, use the single prepared session instead of manually invoking the single-query verifier:
 
 ```bash
-node <skill-dir>/scripts/verify-sensors-events.mjs \
-  --spec <contract.json> \
-  --query \
-  --browser-report /tmp/tracking-browser-local.json \
-  --format json \
-  --out /tmp/tracking-ingestion-local.json
+node <skill-dir>/scripts/run-browser-ingestion-verification.mjs \
+  --session <prepared-session-directory>
 ```
 
-If the first query is `NOT_FOUND`, wait once and run the same command with the same browser report. Do not replace it with a newly calculated relative time window.
+The runner passes the same materialized browser report to every query, so both attempts use identical environment and trigger-window boundaries. A corrected browser action is a new trigger and needs a new browser report/session; it is not a query retry.
 
 Represent every document-declared field through the normal property contract and ignore platform-returned fields that the document does not declare. For a field whose only documented value is an example, validate presence and declared type but accept any actual value of that type. Keep `QUERY_FAILED` distinct from `NOT_FOUND`. HTTP, timeout, permission, OpenAPI, or SQL failures must produce one sanitized `QUERY_FAILED` result for each affected contract event and still write the requested report. A result set that reaches `--limit` is truncated and must remain `QUERY_FAILED` until the time window is narrowed or the limit is safely increased. Check project, environment, time window, ingestion delay, credential, endpoint, and permission before concluding that an event is absent.
 
@@ -355,6 +353,8 @@ Interpret final states consistently:
 ## Delivery format
 
 Return only the artifact required by the selected mode. Do not pad a narrow request with lifecycle sections the user did not request.
+
+Treat per-run contracts, journeys, browser reports, and query attempts as internal temporary evidence. In `browser-verify`, use the marker-owned session runner: it canonicalizes the session, refuses symlinked session paths or artifact paths, and writes artifacts atomically inside that owned directory only. On `PASS` it removes its session; on failure it keeps only `final-report.md` and `debug-bundle.json`. Use `--keep-artifacts` only when the user explicitly asks to preserve debugging files. Never present a stack of `/tmp` JSON files as the normal deliverable.
 
 - `discover` → platform inventory, classification, evidence, and risks.
 - `contract` → normalized contract and unresolved decisions.
