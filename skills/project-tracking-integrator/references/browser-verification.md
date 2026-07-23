@@ -29,7 +29,7 @@
 - local、QA 或 production 环境名和起始 URL。
 - 可安全执行的浏览器步骤和每一步的可见预期结果。
 - 环境过滤值，例如 `localhost:3000` 或 `qa.imastudio.com`，不含协议和路径。
-- 精确事件名、环境和覆盖浏览器触发时刻的短时间窗；稳定 match 字段用于本地候选关联。
+- 精确事件名、环境和浏览器报告中的固定触发区间；稳定 match 字段用于本地候选关联。
 - 已登录的测试会话；登录、OTP、验证码或 Passkey 由用户完成。
 
 对购买、支付、发布、删除、发消息、提交订单、修改线上数据等有明显外部副作用的动作，在执行前确认本次动作已获用户明确授权。优先使用 QA、沙箱和测试账号。
@@ -106,20 +106,35 @@ in-app Browser 可以执行 UI 操作、读取 DOM、确认页面结果并读取
 
 ## 6. 时间和环境关联
 
-在第一个触发动作前记录 `startedAt`。完成旅程后使用：
+在第一个触发动作前记录 `triggerWindow.startedAt`，最后一个可见结果确认后记录 `triggerWindow.finishedAt`。完成旅程后使用：
 
 - 相同的事件契约；
 - local、QA 或 production 环境名；
 - 从浏览器 URL 提取的 `URL.host`，例如 `localhost:3000`；
 - 稳定 match 字段；
-- 覆盖 `startedAt` 的最短可行时间窗；
+- 浏览器报告中的固定 `startedAt`—`finishedAt` 触发区间；
 - 事件期望次数；
 
 查询平台。环境值不能包含协议或路径。ImaStudio 使用：local `lmweb_url LIKE '%localhost:端口%'`、QA `LIKE '%qa.imastudio.com%'`、production `LIKE '%www.imastudio.com%'`。
 
+把上述字段写入浏览器报告，然后直接交给验证器：
+
+```bash
+node <skill-dir>/scripts/verify-sensors-events.mjs \
+  --spec <contract.json> \
+  --query \
+  --browser-report <browser-report.json> \
+  --format json \
+  --out <ingestion-report.json>
+```
+
+`--browser-report` 会同时读取环境隔离字段和固定触发区间，并在 SQL 中生成 `time >= startedAt` 与 `time <= finishedAt`。入库等待不会改变事件发生时间，所以延迟重查必须复用同一份浏览器报告；禁止在每次查询时改用“最近 N 分钟”，否则查询下界会随等待时间向后漂移，把刚才触发的事件排除。
+
 环境、精确事件名和触发时间窗负责从平台获取本次旅程的候选数据；只有需求明确的固定业务标识、本次测试用例值或与被点击元素直接关联的稳定标识才能作为本地 `match`。文档“属性值示例”不得作为 `match` 或精确预期值。平台返回但埋点契约没有声明的字段不参与验收；仅有示例值的字段只验证必填性和声明类型，明确的固定值、枚举或映射规则才做取值比较。
 
-完成操作后等待一个有界的入库延迟再查询。第一次为 `NOT_FOUND` 时至多延迟重查一次；不要高频轮询神策。第二次仍无数据则保持 `NOT_FOUND`，并报告环境、时间窗和 match 条件，不转去做源码审计。若 API、凭证、权限、SQL 或网络失败，仍写出逐事件的 `QUERY_FAILED` 入库报告。若结果达到查询行数上限，返回 `QUERY_FAILED/RESULT_TRUNCATED`，缩短时间窗或安全提高限制后重试；不能把失败或截断结果判为 `NOT_FOUND` 或 `PASS`。
+完成操作后等待一个有界的入库延迟再查询。第一次为 `NOT_FOUND` 时至多延迟重查一次；不要高频轮询神策，并在重查时复用完全相同的浏览器报告和 SQL 时间边界。第二次仍无数据则保持 `NOT_FOUND`，并报告环境、固定时间区间、API 返回条数和 match 后候选条数，不转去做源码审计。若 API、凭证、权限、SQL 或网络失败，仍写出逐事件的 `QUERY_FAILED` 入库报告。若结果达到查询行数上限，返回 `QUERY_FAILED/RESULT_TRUNCATED`，缩短时间窗或安全提高限制后重试；不能把失败或截断结果判为 `NOT_FOUND` 或 `PASS`。
+
+次数只按契约明确声明的边界判断：`minCount` 缺省为 1，`maxCount` 未声明时表示不限制上界。不要因为一次页面旅程包含多个区块曝光而擅自补 `maxCount: 1`；只有“一次用户动作必须且只能上报一次”等明确去重规则才设置最大值。
 
 把浏览器证据保存为可合并的环境报告：
 

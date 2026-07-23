@@ -39,6 +39,9 @@ Query options:
   --auth-mode <mode>            token-query, openapi, bearer, or header
   --api-key-header <name>       Header mode only; default: X-API-Key
   --since-minutes <n>           Query window; default: contract value or 30
+  --browser-report <path>       Use triggerWindow/environment from a browser report
+  --started-at <ISO-8601>       Fixed query lower bound; preferred after a browser trigger
+  --finished-at <ISO-8601>      Fixed query upper bound; requires --started-at
   --environment <name>          local, qa, or production
   --environment-value <value>   URL host substring without protocol/path; e.g. localhost:3000
   --environment-host <host>     Compatibility alias for --environment-value
@@ -84,6 +87,9 @@ function parseArgs(argv) {
         authMode: '',
         apiKeyHeader: '',
         sinceMinutes: undefined,
+        browserReport: '',
+        startedAt: '',
+        finishedAt: '',
         environment: '',
         environmentValue: '',
         environmentHost: '',
@@ -107,6 +113,9 @@ function parseArgs(argv) {
         '--auth-mode',
         '--api-key-header',
         '--since-minutes',
+        '--browser-report',
+        '--started-at',
+        '--finished-at',
         '--environment',
         '--environment-value',
         '--environment-host',
@@ -149,6 +158,9 @@ function parseArgs(argv) {
             '--query-path': 'queryPath',
             '--auth-mode': 'authMode',
             '--api-key-header': 'apiKeyHeader',
+            '--browser-report': 'browserReport',
+            '--started-at': 'startedAt',
+            '--finished-at': 'finishedAt',
             '--environment': 'environment',
             '--environment-value': 'environmentValue',
             '--environment-host': 'environmentHost',
@@ -195,6 +207,19 @@ function validateOptions(options) {
     if (options.sinceMinutes !== undefined && (!Number.isInteger(options.sinceMinutes) || options.sinceMinutes < 1)) {
         fail('--since-minutes must be a positive integer');
     }
+    if (options.browserReport && !options.query) {
+        fail('--browser-report is only supported with --query');
+    }
+    if ((options.startedAt || options.finishedAt) && !options.query) {
+        fail('--started-at and --finished-at are only supported with --query');
+    }
+    if (options.browserReport && (options.startedAt || options.finishedAt)) {
+        fail('--browser-report cannot be combined with --started-at or --finished-at');
+    }
+    if ((options.browserReport || options.startedAt) && options.sinceMinutes !== undefined) {
+        fail('--since-minutes cannot be combined with a fixed browser trigger window');
+    }
+    validateFixedQueryWindow(options.startedAt, options.finishedAt);
     if (!Number.isInteger(options.timeoutMs) || options.timeoutMs < 1000) {
         fail('--timeout-ms must be an integer of at least 1000');
     }
@@ -209,6 +234,53 @@ function validateOptions(options) {
             fail('environment options are only supported with --query');
         }
     }
+}
+
+function parseIsoDate(value, optionName) {
+    if (!value) return null;
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime()) || !/^\d{4}-\d{2}-\d{2}T/.test(value)) {
+        fail(`${optionName} must be a valid ISO-8601 timestamp`);
+    }
+    return date;
+}
+
+function validateFixedQueryWindow(startedAt, finishedAt) {
+    if (finishedAt && !startedAt) {
+        fail('--finished-at requires --started-at');
+    }
+    const from = parseIsoDate(startedAt, '--started-at');
+    const to = parseIsoDate(finishedAt, '--finished-at');
+    if (from && to && to.getTime() < from.getTime()) {
+        fail('--finished-at must not be earlier than --started-at');
+    }
+}
+
+function applyBrowserReportOptions(options, report) {
+    if (!report || typeof report !== 'object' || Array.isArray(report)) {
+        fail('--browser-report must contain a JSON object');
+    }
+    const startedAt = report.triggerWindow?.startedAt;
+    const finishedAt = report.triggerWindow?.finishedAt;
+    if (typeof startedAt !== 'string' || typeof finishedAt !== 'string') {
+        fail('--browser-report must contain triggerWindow.startedAt and triggerWindow.finishedAt');
+    }
+    validateFixedQueryWindow(startedAt, finishedAt);
+
+    const mappings = [
+        ['environment', report.environment],
+        ['environmentProperty', report.environmentProperty],
+        ['environmentValue', report.environmentValue],
+    ];
+    const resolved = { ...options, browserReport: '', startedAt, finishedAt };
+    for (const [name, reportValue] of mappings) {
+        if (!reportValue) continue;
+        if (resolved[name] && resolved[name] !== reportValue) {
+            fail(`--browser-report ${name} conflicts with the CLI value`);
+        }
+        resolved[name] = reportValue;
+    }
+    return resolved;
 }
 
 function validateEnvironmentValue(value) {
@@ -520,11 +592,11 @@ function normalizeContract(raw, selectedEnvironment = '') {
         }
 
         const minCount = event.minCount ?? defaults.minCount ?? 1;
-        const maxCount = event.maxCount ?? defaults.maxCount ?? 1;
+        const maxCount = event.maxCount ?? defaults.maxCount ?? null;
         if (!Number.isInteger(minCount) || minCount < 0) {
             fail(`event ${event.event}.minCount must be a non-negative integer`);
         }
-        if (!Number.isInteger(maxCount) || maxCount < minCount) {
+        if (maxCount !== null && (!Number.isInteger(maxCount) || maxCount < minCount)) {
             fail(`event ${event.event}.maxCount must be an integer >= minCount`);
         }
 
@@ -695,9 +767,14 @@ function compareExpected(expected, rows, query = null) {
     }
     else if (candidates.length === 0) {
         status = 'NOT_FOUND';
-        issues.push({ code: 'NOT_FOUND', message: '未找到符合事件名和稳定字段的入库事件' });
+        issues.push({
+            code: rows.length > 0 ? 'MATCH_NOT_FOUND' : 'NOT_FOUND',
+            message: rows.length > 0
+                ? `神策返回 ${rows.length} 条事件名、环境和时间窗候选，但没有事件符合本地稳定 match`
+                : '神策未返回符合事件名、环境和时间窗的入库事件',
+        });
     }
-    else if (candidates.length > expected.maxCount) {
+    else if (expected.maxCount !== null && candidates.length > expected.maxCount) {
         status = 'DUPLICATED';
         issues.push({
             code: 'COUNT_EXCEEDED',
@@ -724,9 +801,11 @@ function compareExpected(expected, rows, query = null) {
         event: expected.event,
         trigger: expected.trigger,
         status,
+        queriedRowCount: rows.length,
         candidateCount: candidates.length,
         passingCount,
         expectedCount: { min: expected.minCount, max: expected.maxCount },
+        queryWindow: query?.queryWindow || null,
         issues,
     };
 }
@@ -782,16 +861,32 @@ function quoteSqlIdentifier(name) {
     return `\`${name.replaceAll('`', '``')}\``;
 }
 
-function buildSensorsSql(expected, options = {}) {
-    const sinceMinutes = options.sinceMinutes ?? expected.sinceMinutes ?? DEFAULT_SINCE_MINUTES;
+function resolveQueryWindow(expected, options = {}) {
     const now = options.now || new Date();
-    const from = new Date(now.getTime() - sinceMinutes * 60 * 1000);
+    const fixedFrom = parseIsoDate(options.startedAt, '--started-at');
+    const fixedTo = parseIsoDate(options.finishedAt, '--finished-at');
+    const sinceMinutes = options.sinceMinutes ?? expected.sinceMinutes ?? DEFAULT_SINCE_MINUTES;
+    const from = fixedFrom || new Date(now.getTime() - sinceMinutes * 60 * 1000);
+    const to = fixedTo || now;
+    if (to.getTime() < from.getTime()) {
+        fail('query time window ends before it starts');
+    }
+    return {
+        mode: fixedFrom ? 'fixed-browser-trigger' : 'relative',
+        from,
+        to,
+    };
+}
+
+function buildSensorsSql(expected, options = {}) {
+    const { from, to } = resolveQueryWindow(expected, options);
     const partitionCondition = options.authMode === 'openapi'
-        ? `day BETWEEN ${Math.floor(from.getTime() / 86400000) - 1} AND ${Math.floor(now.getTime() / 86400000) + 1}`
-        : `date BETWEEN '${formatLocalDate(from)}' AND '${formatLocalDate(now)}'`;
+        ? `day BETWEEN ${Math.floor(from.getTime() / 86400000) - 1} AND ${Math.floor(to.getTime() / 86400000) + 1}`
+        : `date BETWEEN '${formatLocalDate(from)}' AND '${formatLocalDate(to)}'`;
     const conditions = [
         partitionCondition,
         `time >= '${formatLocalDateTime(from)}'`,
+        `time <= '${formatLocalDateTime(to)}'`,
         `event = '${escapeSqlLiteral(expected.event)}'`,
     ];
     const environmentValue = options.environmentValue || options.environmentHost;
@@ -961,10 +1056,18 @@ function summarizeQueryFailure(error) {
 async function queryAllEvents(contract, options, env = process.env) {
     const results = [];
     const cache = new Map();
+    const queryNow = options.now || new Date();
     for (const expected of contract.events) {
+        const eventOptions = { ...options, now: queryNow };
+        const resolvedWindow = resolveQueryWindow(expected, eventOptions);
+        const queryWindow = {
+            mode: resolvedWindow.mode,
+            startedAt: resolvedWindow.from.toISOString(),
+            finishedAt: resolvedWindow.to.toISOString(),
+        };
         const cacheKey = JSON.stringify({
             event: expected.event,
-            sinceMinutes: options.sinceMinutes ?? expected.sinceMinutes,
+            queryWindow,
             environment: options.environment,
             environmentValue: options.environmentValue || options.environmentHost,
             environmentProperty: options.environmentProperty,
@@ -972,11 +1075,12 @@ async function queryAllEvents(contract, options, env = process.env) {
         });
         if (!cache.has(cacheKey)) {
             try {
-                const rows = await querySensorsEvent(expected, options, env);
+                const rows = await querySensorsEvent(expected, eventOptions, env);
                 cache.set(cacheKey, {
                     rows,
                     truncated: rows.length >= options.limit,
                     limit: options.limit,
+                    queryWindow,
                 });
             }
             catch (error) {
@@ -984,6 +1088,7 @@ async function queryAllEvents(contract, options, env = process.env) {
                     rows: [],
                     truncated: false,
                     limit: options.limit,
+                    queryWindow,
                     error: summarizeQueryFailure(error),
                 });
             }
@@ -1007,11 +1112,14 @@ function formatMarkdown(report, sourceLabel) {
     }
     lines.push(
         '',
-        '| 契约 | 事件 | 状态 | 候选条数 | 通过条数 |',
-        '|---|---|---:|---:|---:|',
+        '| 契约 | 事件 | 状态 | API 返回 | match 后候选 | 通过条数 |',
+        '|---|---|---:|---:|---:|---:|',
     );
     for (const result of report.results) {
-        lines.push(`| ${result.id} | ${result.event} | ${result.status} | ${result.candidateCount} | ${result.passingCount} |`);
+        lines.push(`| ${result.id} | ${result.event} | ${result.status} | ${result.queriedRowCount} | ${result.candidateCount} | ${result.passingCount} |`);
+        if (result.queryWindow) {
+            lines.push(`|  | 查询窗口 | ${result.queryWindow.mode} | ${result.queryWindow.startedAt} | ${result.queryWindow.finishedAt} |  |`);
+        }
     }
     for (const result of report.results.filter(item => item.issues.length > 0)) {
         lines.push('', `## ${result.id} · ${result.status}`, '');
@@ -1036,6 +1144,8 @@ function formatDryRun(contract, options, env = process.env) {
     }
     lines.push('');
     for (const expected of contract.events) {
+        const window = resolveQueryWindow(expected, options);
+        lines.push(`Query window: ${window.mode}; ${window.from.toISOString()} -> ${window.to.toISOString()}`);
         lines.push(`[${expected.id}]`, buildSensorsSql(expected, { ...options, authMode: config.authMode }), '');
     }
     return lines.join('\n');
@@ -1050,6 +1160,10 @@ async function run(argv = process.argv.slice(2), env = process.env) {
     }
 
     const rawContract = await readJsonFile(options.spec);
+    if (options.browserReport) {
+        options = applyBrowserReportOptions(options, await readJsonFile(options.browserReport));
+        validateOptions(options);
+    }
     options = resolveEnvironmentOptions(rawContract, options);
 
     if (options.query) {
@@ -1125,6 +1239,7 @@ export {
     queryAllEvents,
     querySensorsEvent,
     redactValue,
+    resolveQueryWindow,
     resolveCredentialsFile,
     resolveEnvironmentOptions,
     resolveQueryConfig,

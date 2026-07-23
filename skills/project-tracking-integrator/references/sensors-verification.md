@@ -164,6 +164,8 @@ ImaStudio 当前使用公共 URL 属性区分：
 
 不要把神策自动公共属性全部写进业务契约。只验证数据文档明确要求、项目规范要求或业务判断真正依赖的属性。
 
+次数边界也只来自明确契约：`minCount` 缺省为 1；`maxCount` 未填写表示不限制上界。不要把“至少出现一条”擅自解释成“只能出现一条”。只有明确的一次一报、去重或最大次数要求才写 `maxCount`。
+
 ### 示例值不是验收值
 
 数据表中“属性值示例”“示例”“例如”“如”“参考值”等列默认只说明字段形状、类型或书写格式，不代表固定业务值。转写契约时：
@@ -224,6 +226,19 @@ node scripts/verify-sensors-events.mjs \
   --out /tmp/sensors-verification.md
 ```
 
+浏览器自动验收不要使用查询时刻向前计算的相对窗口。把浏览器动作前后记录的固定区间保存到浏览器报告，然后查询：
+
+```bash
+node scripts/verify-sensors-events.mjs \
+  --spec contract.json \
+  --query \
+  --browser-report /tmp/browser-report.json \
+  --format json \
+  --out /tmp/sensors-verification.json
+```
+
+浏览器报告必须包含 `environment`、`environmentProperty`、`environmentValue` 以及 `triggerWindow.startedAt`、`triggerWindow.finishedAt`。验证器把两端转成固定 SQL 时间条件；入库延迟后的唯一一次重查仍复用同一报告，不能重新计算“最近 1 分钟/2 分钟”。对于没有浏览器报告的纯数据查询，才使用 `--since-minutes`。
+
 浏览器能够完成业务动作、但页面全局 SDK handle 在自动化上下文中不可见时，不要判定 `NOT_SENT`，也不要跳过查询。直接按环境、事件和覆盖该动作的时间窗获取候选数据，再在本地用稳定 `match` 关联业务动作。
 
 部署方明确使用 Bearer 时：
@@ -258,7 +273,7 @@ node scripts/verify-sensors-events.mjs \
 | 状态 | 含义 |
 |---|---|
 | `PASS` | 找到期望数量，且所有符合事件名和稳定 match 的候选都满足属性契约 |
-| `NOT_FOUND` | 查询成功，但候选数据中没有符合事件、环境、时间窗和本地 match 的入库数据 |
+| `NOT_FOUND` | 查询成功，但 API 没有返回符合事件、环境和时间窗的数据，或返回数据经本地稳定 match 后没有候选；报告会分别展示 API 返回数与 match 后候选数 |
 | `COUNT_MISMATCH` | 数量少于要求 |
 | `DUPLICATED` | 数量超过允许上限 |
 | `CONTRACT_MISMATCH` | 事件存在，但属性缺失、类型、枚举或取值不一致 |

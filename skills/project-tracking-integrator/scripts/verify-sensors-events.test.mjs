@@ -321,6 +321,38 @@ test('compareQueriedContract never reports a conclusive result from a truncated 
     assert.equal(report.results[0].issues[0].code, 'RESULT_TRUNCATED');
 });
 
+test('an omitted maxCount accepts all candidates that satisfy the contract', () => {
+    const unboundedContract = normalizeContract({
+        events: [{
+            id: 'section-show',
+            event: 'ImaWebStream',
+            minCount: 1,
+            properties: { action_type: { type: 'string' } },
+        }],
+    });
+    const report = compareContract(unboundedContract, [
+        { event: 'ImaWebStream', action_type: 'show' },
+        { event: 'ImaWebStream', action_type: 'show' },
+    ]);
+
+    assert.equal(report.results[0].status, 'PASS');
+    assert.equal(report.results[0].candidateCount, 2);
+    assert.equal(report.results[0].expectedCount.max, null);
+});
+
+test('query reports distinguish API rows from locally matched candidates', () => {
+    const report = compareQueriedContract(contract, [{
+        rows: [{ event: 'ima_function_click', btn_name: 'another_action' }],
+        truncated: false,
+        limit: 100,
+    }]);
+
+    assert.equal(report.results[0].status, 'NOT_FOUND');
+    assert.equal(report.results[0].queriedRowCount, 1);
+    assert.equal(report.results[0].candidateCount, 0);
+    assert.equal(report.results[0].issues[0].code, 'MATCH_NOT_FOUND');
+});
+
 test('queryAllEvents keeps contracts with different time windows isolated', async () => {
     const windowedContract = normalizeContract({
         events: [
@@ -457,6 +489,19 @@ test('buildSensorsSql escapes literals and keeps a bounded query', () => {
     assert.doesNotMatch(sql, /btn_name/);
     assert.match(sql, /time >= '/);
     assert.match(sql, /LIMIT 50$/);
+});
+
+test('buildSensorsSql keeps a fixed browser trigger window stable', () => {
+    const sql = buildSensorsSql({ event: 'ImaWebStream', sinceMinutes: 1 }, {
+        now: new Date('2026-07-23T06:00:00Z'),
+        startedAt: '2026-07-23T04:45:17.656Z',
+        finishedAt: '2026-07-23T04:45:36.349Z',
+        limit: 100,
+    });
+
+    assert.match(sql, /time >= '2026-07-23 \d{2}:45:17\.656'/);
+    assert.match(sql, /time <= '2026-07-23 \d{2}:45:36\.349'/);
+    assert.doesNotMatch(sql, /06:00:00\.000/);
 });
 
 test('buildSensorsSql isolates QA and production by URL hostname', () => {
@@ -717,6 +762,84 @@ test('live query reuses one candidate request for contracts sharing an event', a
         assert.equal(fetchCount, 1);
         const report = JSON.parse(await fs.readFile(out, 'utf8'));
         assert.equal(report.summary.passed, 2);
+    }
+    finally {
+        globalThis.fetch = originalFetch;
+        await fs.rm(temporary, { recursive: true, force: true });
+    }
+});
+
+test('browser report freezes the trigger window across delayed queries', async () => {
+    const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'sensors-browser-window-test-'));
+    const originalFetch = globalThis.fetch;
+    const observedBodies = [];
+    try {
+        const spec = path.join(temporary, 'contract.json');
+        const browserReport = path.join(temporary, 'browser-report.json');
+        const firstOut = path.join(temporary, 'first.json');
+        const retryOut = path.join(temporary, 'retry.json');
+        await fs.writeFile(spec, JSON.stringify({
+            version: 2,
+            environments: {
+                local: {
+                    startUrl: 'http://localhost:3001/community',
+                    query: { property: 'lmweb_url', operator: 'contains', value: 'localhost:3001' },
+                },
+            },
+            events: [{
+                id: 'stream',
+                trigger: 'page show',
+                deduplication: { minCount: 1 },
+                targets: {
+                    sensors: {
+                        status: 'required',
+                        event: 'ImaWebStream',
+                        properties: { action_type: { type: 'string' } },
+                    },
+                },
+            }],
+        }), 'utf8');
+        await fs.writeFile(browserReport, JSON.stringify({
+            environment: 'local',
+            environmentProperty: 'lmweb_url',
+            environmentValue: 'localhost:3001',
+            triggerWindow: {
+                startedAt: '2026-07-23T04:45:17.656Z',
+                finishedAt: '2026-07-23T04:45:36.349Z',
+            },
+        }), 'utf8');
+        globalThis.fetch = async (_url, init) => {
+            observedBodies.push(String(init.body));
+            return new Response(JSON.stringify({
+                events: [
+                    { event: 'ImaWebStream', action_type: 'show' },
+                    { event: 'ImaWebStream', action_type: 'show' },
+                ],
+            }), { status: 200 });
+        };
+
+        const baseArgs = [
+            '--spec', spec,
+            '--query',
+            '--browser-report', browserReport,
+            '--format', 'json',
+        ];
+        const env = {
+            SENSORS_QUERY_BASE_URL: 'https://sensor.example.com',
+            SENSORS_QUERY_PROJECT: 'AiProduct',
+            SENSORS_QUERY_API_SECRET: 'private-test-token',
+        };
+        assert.equal(await run([...baseArgs, '--out', firstOut], env), 0);
+        assert.equal(await run([...baseArgs, '--out', retryOut], env), 0);
+
+        assert.equal(observedBodies.length, 2);
+        assert.equal(observedBodies[0], observedBodies[1]);
+        const report = JSON.parse(await fs.readFile(retryOut, 'utf8'));
+        assert.equal(report.results[0].status, 'PASS');
+        assert.equal(report.results[0].queriedRowCount, 2);
+        assert.equal(report.results[0].candidateCount, 2);
+        assert.equal(report.results[0].queryWindow.startedAt, '2026-07-23T04:45:17.656Z');
+        assert.equal(report.results[0].queryWindow.finishedAt, '2026-07-23T04:45:36.349Z');
     }
     finally {
         globalThis.fetch = originalFetch;

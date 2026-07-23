@@ -237,9 +237,9 @@ The minimum acceptance loop is:
 1. Normalize the supplied screenshot/document into a contract and resolve the target environment, start URL, and browser journey.
 2. Run `validate-browser-journey.mjs` before opening or operating the browser. For production, the validator must load the referenced contract, match the production origin, and confirm every required production event is explicitly `smokeSafe: true`; an invalid preflight means `BLOCKED` and zero browser actions.
 3. Reuse the signed-in in-app browser session. Inspect the live DOM and validate one unique locator immediately before each action; never guess selectors from source code or screenshots.
-4. Wait for a stable route and interactive application state, record the start time, execute only the authorized steps, and verify the visible UI result after every trigger.
+4. Wait for a stable route and interactive application state, record `triggerWindow.startedAt` before the first trigger and `triggerWindow.finishedAt` after the last visible outcome, execute only the authorized steps, and save both timestamps in the browser report.
 5. Read redacted SDK console output when the application exposes it. Treat this as optional runtime evidence because browser automation may execute JavaScript in an isolated world and the in-app browser does not expose general Network request interception.
-6. After a bounded ingestion wait, query candidate rows with the event name, environment value, and trigger time window; apply stable match fields locally before strict contract comparison.
+6. After a bounded ingestion wait, pass the saved browser report to `verify-sensors-events.mjs --browser-report <browser-report.json>`. This freezes the exact trigger window for the first query and retry; never recompute a moving `--since-minutes` window from the later query time. Apply stable match fields locally before strict contract comparison.
 7. Compare event name, properties, values, types, and expected count. If the first query returns `NOT_FOUND`, permit at most one delayed re-query before concluding.
 
 The platform query is mandatory in this mode. A successful click, UI transition, or console message does not prove ingestion. Conversely, do not claim that an outgoing request was captured unless an actual SDK log or captured payload was observed.
@@ -255,7 +255,7 @@ In `verify-data` and the ingestion portion of `browser-verify`, do not begin wit
 1. Transcribe only the requested events, properties, binding value rules, and count constraints from the supplied screenshot/document into a temporary contract. Keep example values out of binding rules.
 2. Use the specified platform and configured read-only credential. Do not infer additional targets.
 3. Query candidate rows in the shortest practical time window using only the event name and environment.
-4. Associate same-name candidates locally only with a stable discriminator explicitly supplied as a binding rule, a current test-case value, or an observed identifier tied to the triggered UI element. Never use a documentation example as `match`. Then require every matched candidate to satisfy required fields, declared types, binding values/enums, and counts.
+4. Associate same-name candidates locally only with a stable discriminator explicitly supplied as a binding rule, a current test-case value, or an observed identifier tied to the triggered UI element. Never use a documentation example as `match`. Then require every matched candidate to satisfy required fields, declared types, binding values/enums, and explicit count constraints. When `maxCount` is absent, do not invent `maxCount: 1`; treat the upper bound as unspecified.
 5. Return a compact per-event result table plus any query limitation, then stop.
 
 Resolve Sensors query configuration in this order without printing secrets:
@@ -307,6 +307,19 @@ node <skill-dir>/scripts/verify-sensors-events.mjs \
   --format json \
   --out /tmp/tracking-ingestion.json
 ```
+
+For `browser-verify`, use the browser report instead of a relative window:
+
+```bash
+node <skill-dir>/scripts/verify-sensors-events.mjs \
+  --spec <contract.json> \
+  --query \
+  --browser-report /tmp/tracking-browser-local.json \
+  --format json \
+  --out /tmp/tracking-ingestion-local.json
+```
+
+If the first query is `NOT_FOUND`, wait once and run the same command with the same browser report. Do not replace it with a newly calculated relative time window.
 
 Represent every document-declared field through the normal property contract and ignore platform-returned fields that the document does not declare. For a field whose only documented value is an example, validate presence and declared type but accept any actual value of that type. Keep `QUERY_FAILED` distinct from `NOT_FOUND`. HTTP, timeout, permission, OpenAPI, or SQL failures must produce one sanitized `QUERY_FAILED` result for each affected contract event and still write the requested report. A result set that reaches `--limit` is truncated and must remain `QUERY_FAILED` until the time window is narrowed or the limit is safely increased. Check project, environment, time window, ingestion delay, credential, endpoint, and permission before concluding that an event is absent.
 
