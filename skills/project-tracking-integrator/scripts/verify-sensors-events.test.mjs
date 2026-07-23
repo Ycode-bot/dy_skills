@@ -6,11 +6,13 @@ import test from 'node:test';
 import {
     buildSensorsSql,
     compareContract,
+    compareQueriedContract,
     formatDryRun,
     normalizeContract,
     normalizeCredentialDocument,
     parseEventRows,
     parseOpenApiRows,
+    queryAllEvents,
     querySensorsEvent,
     resolveCredentialsFile,
     resolveEnvironmentOptions,
@@ -148,6 +150,61 @@ test('environment value rejects protocol and accepts host with port', () => {
     assert.throws(() => validateEnvironmentValue('http://localhost:3000'), /without protocol/);
 });
 
+test('every live query requires a named environment and environment value', () => {
+    assert.throws(
+        () => resolveEnvironmentOptions({ events: [{ event: 'E' }] }, {
+            query: true,
+            environment: '',
+            environmentValue: '',
+            environmentHost: '',
+            environmentProperty: '',
+        }),
+        /--environment is required/,
+    );
+    assert.throws(
+        () => resolveEnvironmentOptions({ events: [{ event: 'E' }] }, {
+            query: true,
+            environment: 'qa',
+            environmentValue: '',
+            environmentHost: '',
+            environmentProperty: '',
+        }),
+        /requires --environment-value/,
+    );
+});
+
+test('environment CLI values cannot override the contract profile or swap QA and production', () => {
+    const raw = {
+        environments: {
+            qa: {
+                startUrl: 'https://qa.imastudio.com',
+                query: { property: 'lmweb_url', operator: 'contains', value: 'qa.imastudio.com' },
+            },
+        },
+        events: [{ event: 'E' }],
+    };
+    assert.throws(
+        () => resolveEnvironmentOptions(raw, {
+            query: true,
+            environment: 'qa',
+            environmentValue: 'www.imastudio.com',
+            environmentHost: '',
+            environmentProperty: '',
+        }),
+        /must equal the qa contract query value/,
+    );
+    assert.throws(
+        () => resolveEnvironmentOptions({ events: [{ event: 'E' }] }, {
+            query: true,
+            environment: 'qa',
+            environmentValue: 'www.imastudio.com',
+            environmentHost: '',
+            environmentProperty: '',
+        }),
+        /belongs to production, not qa/,
+    );
+});
+
 test('parseOpenApiRows maps streamed columns and values into event rows', () => {
     const rows = parseOpenApiRows(JSON.stringify({
         code: 'SUCCESS',
@@ -218,6 +275,98 @@ test('compareContract reports duplicates', () => {
     };
     const report = compareContract(contract, [row, row]);
     assert.equal(report.results[0].status, 'DUPLICATED');
+});
+
+test('compareContract rejects a mixed batch when any matching candidate violates the contract', () => {
+    const mixedContract = normalizeContract({
+        events: [{
+            id: 'mixed-batch',
+            event: 'ImaWebStream',
+            match: { action_type: 2 },
+            minCount: 2,
+            maxCount: 2,
+            properties: {
+                action_type: { type: 'number', equals: 2 },
+                page_content_no: { type: 'string' },
+            },
+        }],
+    });
+    const report = compareContract(mixedContract, [
+        { event: 'ImaWebStream', action_type: 2, page_content_no: '1' },
+        { event: 'ImaWebStream', action_type: 2, page_content_no: 1 },
+    ]);
+
+    assert.equal(report.results[0].status, 'CONTRACT_MISMATCH');
+    assert.equal(report.results[0].candidateCount, 2);
+    assert.equal(report.results[0].passingCount, 1);
+    assert.deepEqual(report.results[0].issues.map(issue => issue.code), ['TYPE_MISMATCH']);
+});
+
+test('compareQueriedContract never reports a conclusive result from a truncated candidate set', () => {
+    const report = compareQueriedContract(contract, [{
+        rows: [
+            {
+                event: 'ima_function_click',
+                f_page: 'community',
+                btn_position: 'ai-creation',
+                btn_name: 'discount_popup_claim_click',
+            },
+            { event: 'ima_function_click', btn_name: 'another_action' },
+        ],
+        truncated: true,
+        limit: 2,
+    }]);
+
+    assert.equal(report.results[0].status, 'QUERY_FAILED');
+    assert.equal(report.results[0].issues[0].code, 'RESULT_TRUNCATED');
+});
+
+test('queryAllEvents keeps contracts with different time windows isolated', async () => {
+    const windowedContract = normalizeContract({
+        events: [
+            {
+                id: 'recent-action',
+                event: 'ima_function_click',
+                sinceMinutes: 5,
+                match: { btn_name: 'recent_action' },
+                properties: { btn_name: { type: 'string', equals: 'recent_action' } },
+            },
+            {
+                id: 'older-action',
+                event: 'ima_function_click',
+                sinceMinutes: 30,
+                match: { btn_name: 'older_action' },
+                properties: { btn_name: { type: 'string', equals: 'older_action' } },
+            },
+        ],
+    });
+    const originalFetch = globalThis.fetch;
+    let requestCount = 0;
+    globalThis.fetch = async () => {
+        requestCount += 1;
+        if (requestCount === 1) return new Response('[]', { status: 200 });
+        return new Response(JSON.stringify([
+            { event: 'ima_function_click', btn_name: 'recent_action' },
+            { event: 'ima_function_click', btn_name: 'older_action' },
+        ]), { status: 200 });
+    };
+    try {
+        const queryResults = await queryAllEvents(windowedContract, {
+            baseUrl: 'https://sensor.example.com',
+            project: 'AiProduct',
+            authMode: 'token-query',
+            limit: 100,
+            timeoutMs: 3000,
+        }, { SENSORS_QUERY_API_SECRET: 'private-test-token' });
+        const report = compareQueriedContract(windowedContract, queryResults);
+
+        assert.equal(requestCount, 2);
+        assert.equal(report.results[0].status, 'NOT_FOUND');
+        assert.equal(report.results[1].status, 'PASS');
+    }
+    finally {
+        globalThis.fetch = originalFetch;
+    }
 });
 
 test('duplicate candidates retain contract mismatch evidence when none pass', () => {
@@ -559,6 +708,8 @@ test('live query reuses one candidate request for contracts sharing an event', a
             '--spec', spec,
             '--query',
             '--credentials', credentials,
+            '--environment', 'local',
+            '--environment-value', 'localhost:3000',
             '--format', 'json',
             '--out', out,
         ]);
@@ -566,6 +717,51 @@ test('live query reuses one candidate request for contracts sharing an event', a
         assert.equal(fetchCount, 1);
         const report = JSON.parse(await fs.readFile(out, 'utf8'));
         assert.equal(report.summary.passed, 2);
+    }
+    finally {
+        globalThis.fetch = originalFetch;
+        await fs.rm(temporary, { recursive: true, force: true });
+    }
+});
+
+test('live query API failures produce a per-event QUERY_FAILED report', async () => {
+    const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'sensors-query-failure-test-'));
+    const originalFetch = globalThis.fetch;
+    try {
+        const spec = path.join(temporary, 'contract.json');
+        const credentials = path.join(temporary, 'credentials.json');
+        const out = path.join(temporary, 'report.json');
+        await fs.writeFile(spec, JSON.stringify({
+            events: [{ id: 'failed-query', event: 'ima_function_click' }],
+        }), 'utf8');
+        await fs.writeFile(credentials, JSON.stringify({
+            default_profile: 'test',
+            profiles: {
+                test: {
+                    hosts: ['https://sensor.internal'],
+                    project: 'AiProduct',
+                    api_key: 'private-token-12345',
+                },
+            },
+        }), { mode: 0o600 });
+        await fs.chmod(credentials, 0o600);
+        globalThis.fetch = async () => new Response('denied', { status: 401 });
+
+        const code = await run([
+            '--spec', spec,
+            '--query',
+            '--credentials', credentials,
+            '--environment', 'qa',
+            '--environment-value', 'qa.imastudio.com',
+            '--format', 'json',
+            '--out', out,
+        ]);
+        assert.equal(code, 1);
+        const report = JSON.parse(await fs.readFile(out, 'utf8'));
+        assert.equal(report.results[0].status, 'QUERY_FAILED');
+        assert.equal(report.results[0].issues[0].code, 'QUERY_FAILED');
+        assert.match(report.results[0].issues[0].message, /HTTP 401/);
+        assert.doesNotMatch(JSON.stringify(report), /private-token-12345/);
     }
     finally {
         globalThis.fetch = originalFetch;

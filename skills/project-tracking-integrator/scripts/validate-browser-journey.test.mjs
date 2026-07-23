@@ -10,6 +10,40 @@ const directory = path.dirname(fileURLToPath(import.meta.url));
 const examplePath = path.resolve(directory, '../references/browser-journey.example.json');
 const example = JSON.parse(fs.readFileSync(examplePath, 'utf8'));
 
+function productionJourney() {
+    const journey = structuredClone(example);
+    journey.name = 'production-safe-smoke';
+    journey.environment = 'production';
+    journey.startUrl = 'https://www.imastudio.com/example';
+    journey.steps[0].url = 'https://www.imastudio.com/example';
+    return journey;
+}
+
+function productionContract(smokeSafe) {
+    return {
+        version: 2,
+        environments: {
+            production: {
+                startUrl: 'https://www.imastudio.com',
+                query: { property: 'lmweb_url', operator: 'contains', value: 'www.imastudio.com' },
+            },
+        },
+        events: [{
+            id: 'safe-smoke',
+            targets: { sensors: { status: 'required', event: 'safe_smoke' } },
+            validation: {
+                environments: {
+                    production: {
+                        status: 'required',
+                        evidence: ['browser', 'ingestion'],
+                        smokeSafe,
+                    },
+                },
+            },
+        }],
+    };
+}
+
 test('browser journey example is valid', () => {
     assert.deepEqual(validateBrowserJourney(example), {
         status: 'PASS',
@@ -56,4 +90,21 @@ test('browser journey requires unique locator intent and bounded platform querie
     assert.equal(report.status, 'INVALID');
     assert.match(report.issues.join('\n'), /locator.value is required/);
     assert.match(report.issues.join('\n'), /maxQueryAttempts must be 1 or 2/);
+});
+
+test('production journey is blocked before browser actions when the contract cannot be read', () => {
+    const report = validateBrowserJourney(productionJourney());
+    assert.equal(report.status, 'INVALID');
+    assert.match(report.issues.join('\n'), /readable tracking contract before browser actions/);
+});
+
+test('production journey is blocked before browser actions when smokeSafe is not true', () => {
+    const report = validateBrowserJourney(productionJourney(), productionContract(false));
+    assert.equal(report.status, 'INVALID');
+    assert.match(report.issues.join('\n'), /smokeSafe is not true/);
+});
+
+test('production journey passes preflight when the contract explicitly marks it smoke safe', () => {
+    const report = validateBrowserJourney(productionJourney(), productionContract(true));
+    assert.equal(report.status, 'PASS');
 });

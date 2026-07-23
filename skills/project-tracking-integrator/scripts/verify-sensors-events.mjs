@@ -10,6 +10,7 @@ import { pathToFileURL } from 'node:url';
 const DEFAULT_QUERY_PATH = '/api/sql/query';
 const DEFAULT_OPENAPI_QUERY_PATH = '/api/v3/analytics/v1/model/sql/query';
 const DEFAULT_LIMIT = 100;
+const MAX_LIMIT = 10000;
 const DEFAULT_SINCE_MINUTES = 30;
 const DEFAULT_CREDENTIALS_FILE = path.join(os.homedir(), '.config', 'imastudio', 'sensors-credentials.json');
 const SENSITIVE_FIELD_PATTERN = /(token|secret|password|authorization|cookie|email|phone|mobile|account|userinfo|distinct[_-]?id)/i;
@@ -42,7 +43,7 @@ Query options:
   --environment-value <value>   URL host substring without protocol/path; e.g. localhost:3000
   --environment-host <host>     Compatibility alias for --environment-value
   --environment-property <key>  Property used for environment; contract or lmweb_url
-  --limit <n>                   Per-contract row limit; default 100, maximum 1000
+  --limit <n>                   Per-query row limit; default 100, maximum 10000
   --timeout-ms <n>              Request timeout; default 30000
   --dry-run                     Print redacted endpoint and SQL without querying
 
@@ -188,8 +189,8 @@ function validateOptions(options) {
     if (!['markdown', 'json'].includes(options.format)) {
         fail('--format must be markdown or json');
     }
-    if (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 1000) {
-        fail('--limit must be an integer between 1 and 1000');
+    if (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > MAX_LIMIT) {
+        fail(`--limit must be an integer between 1 and ${MAX_LIMIT}`);
     }
     if (options.sinceMinutes !== undefined && (!Number.isInteger(options.sinceMinutes) || options.sinceMinutes < 1)) {
         fail('--since-minutes must be a positive integer');
@@ -221,11 +222,40 @@ function validateEnvironmentValue(value) {
     }
 }
 
+function isLocalEnvironmentValue(value) {
+    try {
+        const hostname = new URL(`http://${value}`).hostname;
+        return hostname === 'localhost'
+            || hostname === '[::1]'
+            || /^127(?:\.\d{1,3}){3}$/.test(hostname)
+            || hostname.endsWith('.local');
+    }
+    catch {
+        return false;
+    }
+}
+
+function validateEnvironmentBinding(environment, value, profileValue = '') {
+    if (profileValue && value !== profileValue) {
+        fail(`--environment-value must equal the ${environment} contract query value: ${profileValue}`);
+    }
+    if (environment === 'local' && !isLocalEnvironmentValue(value)) {
+        fail('local queries must use localhost, loopback IP, or a .local host');
+    }
+    const knownImaStudioEnvironment = {
+        'qa.imastudio.com': 'qa',
+        'www.imastudio.com': 'production',
+    }[value];
+    if (knownImaStudioEnvironment && knownImaStudioEnvironment !== environment) {
+        fail(`${value} belongs to ${knownImaStudioEnvironment}, not ${environment}`);
+    }
+}
+
 function resolveEnvironmentOptions(rawContract, options) {
     const profiles = rawContract.environments || {};
     const profileNames = Object.keys(profiles);
-    if (options.query && profileNames.length > 1 && !options.environment) {
-        fail('--environment is required when the contract defines multiple environments');
+    if (options.query && !options.environment) {
+        fail('--environment is required for every live query');
     }
     const profile = options.environment ? profiles[options.environment] : null;
     if (options.environment && profileNames.length > 0 && !profile) {
@@ -243,11 +273,17 @@ function resolveEnvironmentOptions(rawContract, options) {
     }
     const environmentValue = options.environmentValue || options.environmentHost || profileValue;
     const environmentProperty = options.environmentProperty || query.property || 'lmweb_url';
-    if (options.environment && !environmentValue) {
+    if (options.query && !environmentValue) {
         fail(`environment ${options.environment} requires --environment-value or a contract query value`);
     }
+    if (query.property && options.environmentProperty && options.environmentProperty !== query.property) {
+        fail(`--environment-property must equal the ${options.environment} contract query property: ${query.property}`);
+    }
     validateEnvironmentValue(environmentValue);
-    if (environmentValue) quoteSqlIdentifier(environmentProperty);
+    if (environmentValue) {
+        quoteSqlIdentifier(environmentProperty);
+        validateEnvironmentBinding(options.environment, environmentValue, profileValue);
+    }
     return {
         ...options,
         environmentValue,
@@ -625,61 +661,80 @@ function selectorEquivalent(actual, expected) {
         && String(actual) === String(expected);
 }
 
-function compareContract(contract, rows) {
-    const results = contract.events.map(expected => {
-        const candidates = rows.filter(row => {
-            if (getEventName(row) !== expected.event) {
-                return false;
-            }
-            return Object.entries(expected.match).every(([name, value]) => selectorEquivalent(getProperty(row, name), value));
+function compareExpected(expected, rows, query = null) {
+    const candidates = rows.filter(row => {
+        if (getEventName(row) !== expected.event) {
+            return false;
+        }
+        return Object.entries(expected.match).every(([name, value]) => selectorEquivalent(getProperty(row, name), value));
+    });
+    const inspected = candidates.map(row => inspectEvent(row, expected));
+    const passingCount = inspected.filter(issues => issues.length === 0).length;
+    const contractIssues = [...new Map(
+        inspected.flat().map(issue => [
+            JSON.stringify([issue.property, issue.code, issue.message]),
+            issue,
+        ]),
+    ).values()];
+    let status = 'PASS';
+    const issues = [];
+
+    if (query?.error) {
+        status = 'QUERY_FAILED';
+        issues.push({
+            code: 'QUERY_FAILED',
+            message: query.error,
         });
-        const inspected = candidates.map(row => inspectEvent(row, expected));
-        const passingCount = inspected.filter(issues => issues.length === 0).length;
-        const contractIssues = [...new Map(
-            inspected.flat().map(issue => [
-                JSON.stringify([issue.property, issue.code, issue.message]),
-                issue,
-            ]),
-        ).values()];
-        let status = 'PASS';
-        const issues = [];
+    }
+    else if (query?.truncated) {
+        status = 'QUERY_FAILED';
+        issues.push({
+            code: 'RESULT_TRUNCATED',
+            message: `神策查询达到 ${query.limit} 条上限，无法安全判断目标事件是否缺失、重复或全部符合契约；请缩短时间窗或提高 --limit`,
+        });
+    }
+    else if (candidates.length === 0) {
+        status = 'NOT_FOUND';
+        issues.push({ code: 'NOT_FOUND', message: '未找到符合事件名和稳定字段的入库事件' });
+    }
+    else if (candidates.length > expected.maxCount) {
+        status = 'DUPLICATED';
+        issues.push({
+            code: 'COUNT_EXCEEDED',
+            message: `期望最多 ${expected.maxCount} 条，实际 ${candidates.length} 条`,
+        });
+    }
+    else if (candidates.length < expected.minCount) {
+        status = 'COUNT_MISMATCH';
+        issues.push({
+            code: 'COUNT_BELOW_MINIMUM',
+            message: `期望至少 ${expected.minCount} 条，实际 ${candidates.length} 条`,
+        });
+    }
+    else if (passingCount !== candidates.length) {
+        status = 'CONTRACT_MISMATCH';
+    }
 
-        if (candidates.length === 0) {
-            status = 'NOT_FOUND';
-            issues.push({ code: 'NOT_FOUND', message: '未找到符合事件名和稳定字段的入库事件' });
-        }
-        else if (candidates.length > expected.maxCount) {
-            status = 'DUPLICATED';
-            issues.push({
-                code: 'COUNT_EXCEEDED',
-                message: `期望最多 ${expected.maxCount} 条，实际 ${candidates.length} 条`,
-            });
-        }
-        else if (candidates.length < expected.minCount) {
-            status = 'COUNT_MISMATCH';
-            issues.push({
-                code: 'COUNT_BELOW_MINIMUM',
-                message: `期望至少 ${expected.minCount} 条，实际 ${candidates.length} 条`,
-            });
-        }
-        else if (passingCount === 0) {
-            status = 'CONTRACT_MISMATCH';
-        }
+    if (candidates.length > 0 && passingCount !== candidates.length) {
+        issues.push(...contractIssues);
+    }
 
-        if (candidates.length > 0 && passingCount === 0) {
-            issues.push(...contractIssues);
-        }
+    return {
+        id: expected.id,
+        event: expected.event,
+        trigger: expected.trigger,
+        status,
+        candidateCount: candidates.length,
+        passingCount,
+        expectedCount: { min: expected.minCount, max: expected.maxCount },
+        issues,
+    };
+}
 
-        return {
-            id: expected.id,
-            event: expected.event,
-            trigger: expected.trigger,
-            status,
-            candidateCount: candidates.length,
-            passingCount,
-            expectedCount: { min: expected.minCount, max: expected.maxCount },
-            issues,
-        };
+function buildComparisonReport(contract, sources) {
+    const results = contract.events.map((expected, index) => {
+        const source = sources[index] || { rows: [], truncated: false, limit: 0 };
+        return compareExpected(expected, source.rows, source);
     });
 
     return {
@@ -691,6 +746,14 @@ function compareContract(contract, rows) {
         },
         results,
     };
+}
+
+function compareContract(contract, rows) {
+    return buildComparisonReport(contract, contract.events.map(() => ({ rows, truncated: false, limit: 0 })));
+}
+
+function compareQueriedContract(contract, queryResults) {
+    return buildComparisonReport(contract, queryResults);
 }
 
 function escapeSqlLiteral(value) {
@@ -879,8 +942,24 @@ async function querySensorsEvent(expected, options, env = process.env) {
     throw new Error(`Sensors query failed for all configured hosts: ${failures.join('; ')}`);
 }
 
+function summarizeQueryFailure(error) {
+    const message = String(error?.message || '');
+    const httpStatus = message.match(/HTTP\s+(\d{3})/i)?.[1];
+    if (httpStatus) {
+        return `神策查询失败（HTTP ${httpStatus}）；请检查项目、只读凭证、权限和 SQL`;
+    }
+    const openApiCode = message.match(/Sensors OpenAPI\s+([A-Za-z0-9-]+)/)?.[1];
+    if (openApiCode) {
+        return `神策 OpenAPI 查询失败（${openApiCode}）；请检查项目、只读凭证、权限和 SQL`;
+    }
+    if (/timeout|aborted/i.test(message)) {
+        return '神策查询超时；请检查服务可用性、网络和查询时间窗';
+    }
+    return '神策查询失败；请检查服务地址、项目、只读凭证、权限和 SQL';
+}
+
 async function queryAllEvents(contract, options, env = process.env) {
-    const rows = [];
+    const results = [];
     const cache = new Map();
     for (const expected of contract.events) {
         const cacheKey = JSON.stringify({
@@ -892,12 +971,26 @@ async function queryAllEvents(contract, options, env = process.env) {
             limit: options.limit,
         });
         if (!cache.has(cacheKey)) {
-            const result = await querySensorsEvent(expected, options, env);
-            cache.set(cacheKey, result);
-            rows.push(...result);
+            try {
+                const rows = await querySensorsEvent(expected, options, env);
+                cache.set(cacheKey, {
+                    rows,
+                    truncated: rows.length >= options.limit,
+                    limit: options.limit,
+                });
+            }
+            catch (error) {
+                cache.set(cacheKey, {
+                    rows: [],
+                    truncated: false,
+                    limit: options.limit,
+                    error: summarizeQueryFailure(error),
+                });
+            }
         }
+        results.push(cache.get(cacheKey));
     }
-    return rows;
+    return results;
 }
 
 function formatMarkdown(report, sourceLabel) {
@@ -983,10 +1076,9 @@ async function run(argv = process.argv.slice(2), env = process.env) {
         return 0;
     }
 
-    const rows = options.actual
-        ? await readActualEvents(options.actual)
-        : await queryAllEvents(contract, options, env);
-    const report = compareContract(contract, rows);
+    const report = options.actual
+        ? compareContract(contract, await readActualEvents(options.actual))
+        : compareQueriedContract(contract, await queryAllEvents(contract, options, env));
     const environmentValue = options.environmentValue || options.environmentHost;
     if (options.query && environmentValue) {
         report.environment = {
@@ -1022,6 +1114,7 @@ if (isMain) {
 export {
     buildSensorsSql,
     compareContract,
+    compareQueriedContract,
     formatDryRun,
     formatMarkdown,
     loadCredentialProfile,
@@ -1029,11 +1122,14 @@ export {
     normalizeCredentialDocument,
     parseOpenApiRows,
     parseEventRows,
+    queryAllEvents,
     querySensorsEvent,
     redactValue,
     resolveCredentialsFile,
     resolveEnvironmentOptions,
     resolveQueryConfig,
     run,
+    summarizeQueryFailure,
     validateEnvironmentValue,
+    validateEnvironmentBinding,
 };

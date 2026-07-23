@@ -138,6 +138,7 @@ class SelfUpdateTests(unittest.TestCase):
                 next_check_at=now + 3600,
                 result="current",
                 current_remote_sha=revision,
+                local_digest=UPDATER.tree_digest(destination),
             ))
             revision_calls = 0
             original_revision = UPDATER.fetch_remote_revision
@@ -164,6 +165,54 @@ class SelfUpdateTests(unittest.TestCase):
 
             self.assertEqual(result, 0)
             self.assertEqual(revision_calls, 1)
+
+    def test_force_repairs_local_drift_when_remote_revision_matches(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            destination = root / "installed"
+            destination.mkdir()
+            skill_file = destination / "SKILL.md"
+            skill_file.write_text(
+                "---\nname: project-tracking-integrator\n---\noriginal\n",
+                encoding="utf-8",
+            )
+            revision = "d" * 40
+            now = time.time()
+            UPDATER.write_update_state(destination, UPDATER.build_update_state(
+                {},
+                source=UPDATER.DEFAULT_SOURCE,
+                ref=UPDATER.DEFAULT_REF,
+                now=now,
+                next_check_at=now + 3600,
+                result="current",
+                current_remote_sha=revision,
+                local_digest=UPDATER.tree_digest(destination),
+            ))
+            skill_file.write_text(
+                "---\nname: project-tracking-integrator\n---\ncorrupted\n",
+                encoding="utf-8",
+            )
+            archive_path = root / "remote.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr(
+                    "dy_skills-main/skills/project-tracking-integrator/SKILL.md",
+                    "---\nname: project-tracking-integrator\n---\noriginal\n",
+                )
+
+            original_download = UPDATER.download_archive
+            original_revision = UPDATER.fetch_remote_revision
+            UPDATER.download_archive = lambda *_args, **_kwargs: archive_path
+            UPDATER.fetch_remote_revision = lambda *_args, **_kwargs: revision
+            try:
+                result = UPDATER.main(["--dest", str(destination), "--force"])
+            finally:
+                UPDATER.download_archive = original_download
+                UPDATER.fetch_remote_revision = original_revision
+
+            self.assertEqual(result, 2)
+            self.assertIn("original", skill_file.read_text(encoding="utf-8"))
+            state = UPDATER.load_update_state(destination)
+            self.assertEqual(state["local_digest"], UPDATER.tree_digest(destination))
 
     def test_failed_check_is_cached_for_retry_interval(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -225,6 +274,10 @@ class SelfUpdateTests(unittest.TestCase):
             self.assertIn("new", (destination / "SKILL.md").read_text(encoding="utf-8"))
             self.assertTrue((destination / "scripts" / "tool.py").is_file())
             self.assertEqual(UPDATER.load_update_state(destination)["current_remote_sha"], "c" * 40)
+            self.assertEqual(
+                UPDATER.load_update_state(destination)["local_digest"],
+                UPDATER.tree_digest(destination),
+            )
 
 
 if __name__ == "__main__":

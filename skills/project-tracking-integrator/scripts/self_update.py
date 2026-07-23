@@ -146,6 +146,7 @@ def build_update_state(
     next_check_at: float,
     result: str,
     current_remote_sha: str | None = None,
+    local_digest: str | None = None,
     update_available: bool = False,
 ) -> dict:
     state = {
@@ -161,6 +162,10 @@ def build_update_state(
     resolved_sha = current_remote_sha or previous_sha
     if resolved_sha:
         state["current_remote_sha"] = resolved_sha
+    previous_digest = previous.get("local_digest") if state_matches(previous, source, ref) else None
+    resolved_digest = local_digest or previous_digest
+    if resolved_digest:
+        state["local_digest"] = resolved_digest
     return state
 
 
@@ -373,8 +378,10 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             remote_revision = fetch_remote_revision(owner, repo, args.ref, remote_skill, args.timeout)
             current_revision = state.get("current_remote_sha") if state_matches(state, args.source, args.ref) else None
+            recorded_digest = state.get("local_digest") if state_matches(state, args.source, args.ref) else None
+            current_digest = tree_digest(destination)
             next_check_at = now + args.interval_hours * 3600
-            if current_revision == remote_revision:
+            if current_revision == remote_revision and recorded_digest == current_digest:
                 write_update_state(destination, build_update_state(
                     state,
                     source=args.source,
@@ -383,6 +390,7 @@ def main(argv: list[str] | None = None) -> int:
                     next_check_at=next_check_at,
                     result="current",
                     current_remote_sha=remote_revision,
+                    local_digest=current_digest,
                 ))
                 print(f"{SKILL_NAME} is already up to date.", file=sys.stderr)
                 return 0
@@ -406,6 +414,7 @@ def main(argv: list[str] | None = None) -> int:
                 source = repository_root / "skills" / remote_skill
                 validate_remote_skill(source, remote_skill)
                 if tree_digest(source) == tree_digest(destination):
+                    current_digest = tree_digest(destination)
                     write_update_state(destination, build_update_state(
                         state,
                         source=args.source,
@@ -414,6 +423,7 @@ def main(argv: list[str] | None = None) -> int:
                         next_check_at=next_check_at,
                         result="current",
                         current_remote_sha=remote_revision,
+                        local_digest=current_digest,
                     ))
                     print(f"{SKILL_NAME} is already up to date.", file=sys.stderr)
                     return 0
@@ -430,6 +440,7 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"{SKILL_NAME} update is available.", file=sys.stderr)
                     return 2
                 atomic_install(source, destination)
+                installed_digest = tree_digest(destination)
                 write_update_state(destination, build_update_state(
                     {},
                     source=args.source,
@@ -438,6 +449,7 @@ def main(argv: list[str] | None = None) -> int:
                     next_check_at=next_check_at,
                     result="updated",
                     current_remote_sha=remote_revision,
+                    local_digest=installed_digest,
                 ))
                 print(
                     f"{SKILL_NAME} installed the latest files from "

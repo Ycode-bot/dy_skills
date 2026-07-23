@@ -156,9 +156,9 @@ test('buildReport keeps local, QA, and production results independent of input o
         { environment: 'production', results: [{ id: 'signup-click', platform: 'sensors', status: 'PASS' }] },
     ];
     const ingestion = [
-        { environment: { name: 'local' }, results: [{ id: 'signup-click', status: 'PASS' }] },
-        { environment: { name: 'qa' }, results: [{ id: 'signup-click', status: 'NOT_FOUND' }] },
-        { environment: { name: 'production' }, results: [{ id: 'signup-click', status: 'PASS' }] },
+        { environment: { name: 'local', property: 'lmweb_url', value: 'localhost:3000' }, results: [{ id: 'signup-click', status: 'PASS' }] },
+        { environment: { name: 'qa', property: 'lmweb_url', value: 'qa.imastudio.com' }, results: [{ id: 'signup-click', status: 'NOT_FOUND' }] },
+        { environment: { name: 'production', property: 'lmweb_url', value: 'www.imastudio.com' }, results: [{ id: 'signup-click', status: 'PASS' }] },
     ];
 
     const forward = buildReport({ contract: environmentContract, source, browser, ingestion });
@@ -176,6 +176,61 @@ test('buildReport keeps local, QA, and production results independent of input o
     assert.equal(forward.gates.qa.status, 'FAILED');
     assert.equal(forward.gates.production.status, 'BLOCKED');
     assert.equal(forward.gates.production.blockedBy, 'qa');
+});
+
+test('buildReport rejects ingestion evidence whose filter does not match the named environment', () => {
+    const environmentContract = {
+        version: 2,
+        environments: {
+            qa: {
+                startUrl: 'https://qa.imastudio.com',
+                query: { property: 'lmweb_url', operator: 'contains', value: 'qa.imastudio.com' },
+            },
+        },
+        events: [{
+            id: 'signup-click',
+            trigger: '用户点击注册按钮',
+            targets: { sensors: { status: 'required', event: 'signup_click' } },
+            validation: {
+                environments: {
+                    qa: { status: 'required', evidence: ['ingestion'] },
+                },
+            },
+        }],
+    };
+    const ingestion = {
+        environment: { name: 'qa', property: 'lmweb_url', value: 'www.imastudio.com' },
+        results: [{ id: 'signup-click', status: 'PASS' }],
+    };
+
+    const report = buildReport({ contract: environmentContract, ingestion });
+
+    assert.equal(report.status, 'FAILED');
+    assert.equal(report.results[0].ingestion, 'QUERY_FAILED');
+    assert.equal(report.results[0].status, 'QUERY_FAILED');
+});
+
+test('buildReport rejects ingestion evidence that omits environment filter metadata', () => {
+    const environmentContract = {
+        version: 2,
+        environments: {
+            qa: {
+                startUrl: 'https://qa.imastudio.com',
+                query: { property: 'lmweb_url', operator: 'contains', value: 'qa.imastudio.com' },
+            },
+        },
+        events: [{
+            id: 'signup-click',
+            targets: { sensors: { status: 'required', event: 'signup_click' } },
+            validation: { environments: { qa: { status: 'required', evidence: ['ingestion'] } } },
+        }],
+    };
+    const ingestion = { results: [{ id: 'signup-click', status: 'PASS' }] };
+
+    const report = buildReport({ contract: environmentContract, ingestion });
+
+    assert.equal(report.status, 'FAILED');
+    assert.equal(report.results[0].ingestion, 'QUERY_FAILED');
 });
 
 test('production verification is blocked unless the event is smoke safe', () => {

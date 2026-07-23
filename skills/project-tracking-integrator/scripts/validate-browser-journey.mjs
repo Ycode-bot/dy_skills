@@ -78,7 +78,40 @@ function validateEnvironment(environment, startUrl, issues) {
     }
 }
 
-export function validateBrowserJourney(journey) {
+function validateProductionSafety(journey, contract, startUrl, issues) {
+    const isProduction = journey.environment === 'production'
+        || journey.environmentHost === 'www.imastudio.com';
+    if (!isProduction) return;
+    if (!isObject(contract) || !Array.isArray(contract.events) || contract.events.length === 0) {
+        issues.push('production journey requires a readable tracking contract before browser actions');
+        return;
+    }
+    const productionProfile = contract.environments?.production;
+    if (!productionProfile?.startUrl) {
+        issues.push('production contract must define environments.production.startUrl');
+    }
+    else {
+        const contractUrl = requireHttpUrl(productionProfile.startUrl, 'contract environments.production.startUrl', issues);
+        if (contractUrl && startUrl && contractUrl.origin !== startUrl.origin) {
+            issues.push('production journey origin must equal the production contract origin');
+        }
+    }
+
+    const unsafeEvents = contract.events.filter(event => {
+        const targets = event.targets || { sensors: { status: 'required' } };
+        const hasRequiredTarget = Object.values(targets).some(target => target?.status === 'required');
+        if (!hasRequiredTarget) return false;
+        const requirement = event.validation?.environments?.production;
+        if (['optional', 'disabled'].includes(requirement?.status)) return false;
+        return requirement?.status !== 'required' || requirement.smokeSafe !== true;
+    });
+    if (unsafeEvents.length > 0) {
+        const ids = unsafeEvents.map((event, index) => event.id || event.event || `event-${index + 1}`);
+        issues.push(`production journey is blocked because smokeSafe is not true for: ${ids.join(', ')}`);
+    }
+}
+
+export function validateBrowserJourney(journey, contract = null) {
     const issues = [];
     if (!isObject(journey)) {
         return { status: 'INVALID', issues: ['journey must be an object'] };
@@ -96,6 +129,7 @@ export function validateBrowserJourney(journey) {
     if (journey.version === 2) {
         validateEnvironment(journey.environment, startUrl, issues);
     }
+    validateProductionSafety(journey, contract, startUrl, issues);
 
     if (!Array.isArray(journey.steps) || journey.steps.length === 0) {
         issues.push('steps must contain at least one step');
@@ -172,7 +206,19 @@ function main() {
     }
     const file = path.resolve(args.journey);
     const journey = JSON.parse(fs.readFileSync(file, 'utf8'));
-    const report = validateBrowserJourney(journey);
+    let contract = null;
+    const isProduction = journey.environment === 'production'
+        || journey.environmentHost === 'www.imastudio.com';
+    if (isProduction && nonEmpty(journey.verification?.contract)) {
+        try {
+            const contractFile = path.resolve(path.dirname(file), journey.verification.contract);
+            contract = JSON.parse(fs.readFileSync(contractFile, 'utf8'));
+        }
+        catch {
+            contract = null;
+        }
+    }
+    const report = validateBrowserJourney(journey, contract);
     const output = `${JSON.stringify(report, null, 2)}\n`;
     if (args.out) fs.writeFileSync(path.resolve(args.out), output);
     else process.stdout.write(output);

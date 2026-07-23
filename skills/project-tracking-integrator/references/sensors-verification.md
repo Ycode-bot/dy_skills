@@ -112,11 +112,11 @@ node scripts/verify-sensors-events.mjs \
 
 Profile 会根据凭证自动选择协议：以 `#K-` 开头的 35 字符 API Key 使用 `openapi`，请求 `/api/v3/analytics/v1/model/sql/query`，并发送 `api-key` 与 `sensorsdata-project` Header；其他值默认作为旧查询 API 的 token/API_SECRET，使用 `token-query`。也可显式配置 `auth_mode`。多个 `hosts` 会按顺序尝试；认证失败不会盲目切换 Host。
 
-不要直接用带占位符的 `credentials.example.json` 发起真实查询。复制为私有文件并替换 `hosts`、`project`、`api_key`；脚本会拒绝占位符和权限过宽的真实凭证文件。
+不要直接用带占位符的 [credentials.example.json](credentials.example.json) 发起真实查询。复制到仓库外的私有路径并替换 `hosts`、`project`、`api_key`；脚本会拒绝占位符和权限过宽的真实凭证文件。
 
 ## 4. 同项目多环境隔离
 
-当本地、测试和生产环境写入同一个神策项目时，环境过滤是验收查询的必填条件，不能把三套数据混在一起比较。
+当本地、测试和生产环境写入同一个神策项目时，环境名和环境过滤值是每次在线验收查询的必填条件，不能把三套数据混在一起比较。契约已声明环境 profile 时，命令行属性和值必须与所选 profile 完全一致；禁止把 production 值标成 QA，或用 CLI 绕过契约过滤条件。
 
 ImaStudio 当前使用公共 URL 属性区分：
 
@@ -232,7 +232,7 @@ node scripts/verify-sensors-events.mjs \
   --api-key-header X-API-Key
 ```
 
-官方说明查询 API 适合低频调用。保持分钟级调用、短时间窗、单次不超过一万条、并发不超过十个。本脚本串行查询，单事件默认最多返回 100 条，硬上限 1000 条。
+官方说明查询 API 适合低频调用。保持分钟级调用、短时间窗、单次不超过一万条、并发不超过十个。本脚本串行查询，单次默认最多返回 100 条，硬上限 10000 条。如果返回条数达到 `--limit`，结果视为截断并返回 `QUERY_FAILED/RESULT_TRUNCATED`；缩短时间窗或安全提高限制后重新查询，不能从截断结果推断 `NOT_FOUND`、`PASS` 或精确次数。
 
 参考：
 
@@ -247,13 +247,14 @@ node scripts/verify-sensors-events.mjs \
 
 | 状态 | 含义 |
 |---|---|
-| `PASS` | 找到期望数量且至少一条完全满足属性契约 |
+| `PASS` | 找到期望数量，且所有符合事件名和稳定 match 的候选都满足属性契约 |
 | `NOT_FOUND` | 查询成功，但候选数据中没有符合事件、环境、时间窗和本地 match 的入库数据 |
 | `COUNT_MISMATCH` | 数量少于要求 |
 | `DUPLICATED` | 数量超过允许上限 |
 | `CONTRACT_MISMATCH` | 事件存在，但属性缺失、类型、枚举或取值不一致 |
+| `QUERY_FAILED` | API、凭证或权限失败，或者候选结果达到查询上限而被截断，无法得出安全结论 |
 
-API 超时、HTTP 错误、凭证或权限错误属于查询失败，不能伪装成事件未入库。
+API 超时、HTTP 错误、凭证、权限、OpenAPI 或 SQL 错误属于查询失败，不能伪装成事件未入库。验证器会为每个受影响事件写入脱敏的 `QUERY_FAILED` 结果并保存报告；只有凭证文件本身无法读取或契约非法等前置配置错误才在查询前终止。
 
 ## 9. 安全规则
 

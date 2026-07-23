@@ -33,7 +33,7 @@ Interpret the exit code as follows:
 - `2`: the installed Skill changed, or `--check-only` found an update. After installation, re-read the updated `SKILL.md` and continue without running the updater again; after `--check-only`, report availability without claiming installation.
 - `1`: the network or update failed; warn briefly and continue with the local version.
 
-The updater stores non-secret timing and revision state in `.update-state.json`. Normal invocations use the cached result for 24 hours without contacting the network. When due, the updater first checks the latest Git commit that changed `skills/project-tracking-integrator`; it downloads the repository archive only when that revision differs or when no trusted local revision exists. Failed checks wait one hour before another automatic attempt. An explicit `--force` always bypasses the cache.
+The updater stores non-secret timing, revision, and installed-tree digest state in `.update-state.json`. Normal invocations use the cached result for 24 hours without contacting the network. When due, the updater first checks the latest Git commit that changed `skills/project-tracking-integrator`; it downloads the repository archive only when that revision differs, when no trusted local revision exists, or when the installed files drift from their recorded digest. Failed checks wait one hour before another automatic attempt. An explicit `--force` always bypasses the cache and verifies installed-file integrity.
 
 When a download is required, the updater validates the remote Skill, compares a complete file-tree digest, and replaces the installed directory atomically. It preserves local runtime directories, refuses to overwrite a Git working tree by default, and treats update failure as non-blocking.
 
@@ -81,10 +81,11 @@ When both code and data language appear, prefer `verify-data` if the requested c
 2. Never substitute source files, wrapper reachability, Tracking Maps, or static checks for actual platform data.
 3. Never return `INCOMPLETE` merely because source/runtime evidence was not collected; those layers are outside this mode.
 4. If credentials, project, time range, or a safe filter are missing, return `BLOCKED` with only the minimum missing input. Do not switch to source audit.
-5. If the API request fails, return `QUERY_FAILED`; if it succeeds with no rows, return `NOT_FOUND`.
+5. If the API request fails, still write the ingestion report and return a sanitized per-event `QUERY_FAILED`; if it succeeds with no rows, return `NOT_FOUND`. Do not collapse an API failure into terminal prose without a report.
 6. Return `PASS`, `NOT_FOUND`, `COUNT_MISMATCH`, `DUPLICATED`, `CONTRACT_MISMATCH`, `BLOCKED`, or `QUERY_FAILED` for every requested event. A prose code review is not a valid result.
-7. When one analytics project contains multiple deployment environments, require an environment filter before querying. Never mix local, QA, and production rows in one acceptance conclusion.
-8. Query the platform by event, environment, and time window. Apply stable `match` fields locally to associate same-name business actions, then strictly compare only the properties and count rules declared by the data requirement; ignore additional platform-returned fields.
+7. Require a named environment and an exact environment-filter value for every live query. When the contract declares an environment query, CLI property/value must match it exactly. Never mix local, QA, and production rows in one acceptance conclusion.
+8. Query the platform by event, environment, and time window. Keep each contract's time-window result isolated. Apply stable `match` fields locally to associate same-name business actions, then require every matched candidate to satisfy the declared properties and count rules; ignore additional platform-returned fields.
+9. If a live query reaches its configured row limit, return `QUERY_FAILED` with `RESULT_TRUNCATED`; never infer `NOT_FOUND`, `PASS`, or an exact count from a truncated candidate set.
 
 ### Narrow-mode examples
 
@@ -230,11 +231,12 @@ Before any browser action, require the Codex [@Browser](plugin://browser@openai-
 The minimum acceptance loop is:
 
 1. Normalize the supplied screenshot/document into a contract and resolve the target environment, start URL, and browser journey.
-2. Reuse the signed-in in-app browser session. Inspect the live DOM and validate one unique locator immediately before each action; never guess selectors from source code or screenshots.
-3. Wait for a stable route and interactive application state, record the start time, execute only the authorized steps, and verify the visible UI result after every trigger.
-4. Read redacted SDK console output when the application exposes it. Treat this as optional runtime evidence because browser automation may execute JavaScript in an isolated world and the in-app browser does not expose general Network request interception.
-5. After a bounded ingestion wait, query candidate rows with the event name, environment value, and trigger time window; apply stable match fields locally before strict contract comparison.
-6. Compare event name, properties, values, types, and expected count. If the first query returns `NOT_FOUND`, permit at most one delayed re-query before concluding.
+2. Run `validate-browser-journey.mjs` before opening or operating the browser. For production, the validator must load the referenced contract, match the production origin, and confirm every required production event is explicitly `smokeSafe: true`; an invalid preflight means `BLOCKED` and zero browser actions.
+3. Reuse the signed-in in-app browser session. Inspect the live DOM and validate one unique locator immediately before each action; never guess selectors from source code or screenshots.
+4. Wait for a stable route and interactive application state, record the start time, execute only the authorized steps, and verify the visible UI result after every trigger.
+5. Read redacted SDK console output when the application exposes it. Treat this as optional runtime evidence because browser automation may execute JavaScript in an isolated world and the in-app browser does not expose general Network request interception.
+6. After a bounded ingestion wait, query candidate rows with the event name, environment value, and trigger time window; apply stable match fields locally before strict contract comparison.
+7. Compare event name, properties, values, types, and expected count. If the first query returns `NOT_FOUND`, permit at most one delayed re-query before concluding.
 
 The platform query is mandatory in this mode. A successful click, UI transition, or console message does not prove ingestion. Conversely, do not claim that an outgoing request was captured unless an actual SDK log or captured payload was observed.
 
@@ -249,7 +251,7 @@ In `verify-data` and the ingestion portion of `browser-verify`, do not begin wit
 1. Transcribe only the requested events, match selectors, properties, expected values, and count constraints from the supplied screenshot/document into a temporary contract.
 2. Use the specified platform and configured read-only credential. Do not infer additional targets.
 3. Query candidate rows in the shortest practical time window using only the event name and environment.
-4. Associate same-name candidates locally with stable `match` fields, then strictly compare expected and actual fields, types, values, enums, and counts.
+4. Associate same-name candidates locally with stable `match` fields, then require every matched candidate to satisfy expected fields, types, values, enums, and counts.
 5. Return a compact per-event result table plus any query limitation, then stop.
 
 Resolve Sensors query configuration in this order without printing secrets:
@@ -268,7 +270,7 @@ When the same Sensors project receives more than one application environment, ad
 | QA acceptance before release | `lmweb_url` contains `qa.imastudio.com` | `--environment qa --environment-value qa.imastudio.com` |
 | Production smoke check after release | `lmweb_url` contains `www.imastudio.com` | `--environment production --environment-value www.imastudio.com` |
 
-Use the environment value without protocol or path. Derive local values from `new URL(startUrl).host`, preserving the port. The default property is `lmweb_url`; override it only when the repository/data team confirms another common field with `--environment-property <name>`. The live SQL uses environment, event, and a time window covering the browser trigger. Stable action `match` fields are applied to the returned candidates locally so a platform-side column type mismatch becomes a contract result instead of a SQL failure. Any match field whose type or value must be accepted must also appear in `properties`.
+Use the environment value without protocol or path. Derive local values from `new URL(startUrl).host`, preserving the port. Every live query requires both `--environment` and an environment value, either supplied explicitly or resolved from the selected contract profile. The selected property/value cannot override or contradict that profile. The default property is `lmweb_url`; override it only when the repository/data team confirms another common field with `--environment-property <name>`. The live SQL uses environment, event, and a time window covering the browser trigger. Stable action `match` fields are applied to the returned candidates locally so a platform-side column type mismatch becomes a contract result instead of a SQL failure. Any match field whose type or value must be accepted must also appear in `properties`.
 
 If the query would be too broad because a generic event lacks a stable selector such as `btn_name` or `page`, ask only for that minimum business filter. Do not compensate by auditing wrappers, Tracking Maps, GA/GTM, or unrelated events.
 
@@ -302,7 +304,7 @@ node <skill-dir>/scripts/verify-sensors-events.mjs \
   --out /tmp/tracking-ingestion.json
 ```
 
-Represent every document-declared field through the normal property contract and ignore platform-returned fields that the document does not declare. Keep `QUERY_FAILED` distinct from `NOT_FOUND`. Check project, environment, time window, ingestion delay, credential, endpoint, and permission before concluding that an event is absent.
+Represent every document-declared field through the normal property contract and ignore platform-returned fields that the document does not declare. Keep `QUERY_FAILED` distinct from `NOT_FOUND`. HTTP, timeout, permission, OpenAPI, or SQL failures must produce one sanitized `QUERY_FAILED` result for each affected contract event and still write the requested report. A result set that reaches `--limit` is truncated and must remain `QUERY_FAILED` until the time window is narrowed or the limit is safely increased. Check project, environment, time window, ingestion delay, credential, endpoint, and permission before concluding that an event is absent.
 
 ## Capability: Generate the final acceptance report
 
@@ -331,7 +333,7 @@ Interpret final states consistently:
 - `NOT_SENT`: an actual capture/debug surface was available and the expected runtime payload was absent; an unreadable SDK global is only `NOT_AVAILABLE`.
 - `NOT_FOUND`: the query succeeded but no matching ingested event was found.
 - `COUNT_MISMATCH` / `DUPLICATED` / `CONTRACT_MISMATCH`: count or schema differs.
-- `QUERY_FAILED`: endpoint, credential, permission, timeout, or API execution failed.
+- `QUERY_FAILED`: endpoint, credential, permission, timeout, API execution failed, or the candidate result reached its row limit and was truncated.
 
 ## Delivery format
 

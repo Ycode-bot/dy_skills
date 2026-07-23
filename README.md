@@ -2,7 +2,8 @@
 
 Reusable, repo-aware AI skills for engineering workflows.
 
-These skills are designed to **scan a codebase first**, then produce:
+These skills select the narrowest workflow required by the request. Repository-aware tasks may produce:
+
 1. Findings
 2. Action plan
 3. Patch draft
@@ -66,7 +67,7 @@ Disable auto-update for a run:
 ACTIVITY_CMS_PSD_AUTO_UPDATE=0 ./activity-cms-psd "/path/to/activity.psd" --out "/path/to/activity-output"
 ```
 
-`project-tracking-integrator` reads a local update cache at the beginning of every invocation. By default it contacts GitHub at most once every 24 hours, checks the latest commit for that Skill path, and downloads the repository only when the revision changed. Installed copies update atomically and continue with the latest instructions; Git working trees are never overwritten by default. Failed checks wait one hour before retrying and do not block the local workflow.
+`project-tracking-integrator` reads a local update cache at the beginning of every invocation. By default it contacts GitHub at most once every 24 hours, checks the latest commit for that Skill path, and verifies the recorded installed-tree digest. It downloads the repository when the revision changed, the trusted revision is missing, or installed files drifted. Installed copies update atomically and continue with the latest instructions; Git working trees are never overwritten by default. Failed checks wait one hour before retrying and do not block the local workflow.
 
 Force an immediate update check:
 

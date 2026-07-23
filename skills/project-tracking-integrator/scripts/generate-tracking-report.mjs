@@ -144,15 +144,61 @@ function environmentName(value) {
     return '';
 }
 
-function resultMap(reportValue, defaultPlatform = '') {
+function expectedEnvironmentEvidence(contract, environment) {
+    const profile = contract?.environments?.[environment];
+    if (!profile?.query) return null;
+    let value = profile.query.value || '';
+    if (!value && profile.query.valueFrom === 'browser-host' && profile.startUrl) {
+        try {
+            value = new URL(profile.startUrl).host;
+        }
+        catch {
+            return null;
+        }
+    }
+    return { property: profile.query.property || 'lmweb_url', value };
+}
+
+function reportEnvironmentMatches(report, contract) {
+    const environment = report?.environment;
+    const name = environmentName(environment);
+    const expected = expectedEnvironmentEvidence(contract, name);
+    if (!expected) return false;
+    return environment
+        && typeof environment === 'object'
+        && environment.property === expected.property
+        && environment.value === expected.value;
+}
+
+function hasInvalidIngestionEvidence(reports, contract, row) {
+    return reports.some(report => {
+        if (reportEnvironmentMatches(report, contract)) return false;
+        const declaredEnvironment = environmentName(report?.environment);
+        if (declaredEnvironment
+            && contract?.environments?.[declaredEnvironment]
+            && declaredEnvironment !== row.environment) {
+            return false;
+        }
+        return (report?.results || []).some(result => {
+            const platform = result.platform || 'sensors';
+            return result.id === row.id && platform === row.platform;
+        });
+    });
+}
+
+function resultMap(reportValue, defaultPlatform = '', { contract = null, requireEnvironmentEvidence = false } = {}) {
     const map = new Map();
     for (const report of asReports(reportValue)) {
         const reportEnvironment = environmentName(report.environment);
+        const environmentMismatch = requireEnvironmentEvidence
+            && Object.keys(contract?.environments || {}).length > 0
+            && !reportEnvironmentMatches(report, contract);
         for (const result of report?.results || []) {
             const platform = result.platform || defaultPlatform;
             const environment = environmentName(result.environment) || reportEnvironment;
-            map.set(`${result.id}::${platform}::${environment}`, result);
-            if (!platform) map.set(`${result.id}::::${environment}`, result);
+            const normalizedResult = environmentMismatch ? { ...result, status: 'QUERY_FAILED' } : result;
+            map.set(`${result.id}::${platform}::${environment}`, normalizedResult);
+            if (!platform) map.set(`${result.id}::::${environment}`, normalizedResult);
         }
     }
     return map;
@@ -226,7 +272,10 @@ function buildReport({ contract, scan = null, source = null, browser = null, run
     const sourceMap = resultMap(sourceReports);
     const browserMap = resultMap(browserReports);
     const runtimeMap = resultMap(runtimeReports);
-    const ingestionMap = resultMap(ingestionReports, 'sensors');
+    const ingestionMap = resultMap(ingestionReports, 'sensors', {
+        contract,
+        requireEnvironmentEvidence: true,
+    });
     const results = contractRows(contract).map(row => {
         const result = {
             ...row,
@@ -245,6 +294,11 @@ function buildReport({ contract, scan = null, source = null, browser = null, run
                 fallbackPlatform: stage === 'ingestion' && row.platform === 'sensors' ? 'sensors' : '',
                 allowGlobal: stage === 'source',
             });
+            if (stage === 'ingestion'
+                && result[stage] === 'NOT_RUN'
+                && hasInvalidIngestionEvidence(ingestionReports, contract, row)) {
+                result[stage] = 'QUERY_FAILED';
+            }
         }
         result.status = finalStatus(result);
         return result;
@@ -357,4 +411,15 @@ if (isMain) {
     });
 }
 
-export { buildGates, buildReport, contractRows, finalStatus, formatMarkdown, parseArgs, resultMap, run };
+export {
+    buildGates,
+    buildReport,
+    contractRows,
+    expectedEnvironmentEvidence,
+    finalStatus,
+    formatMarkdown,
+    parseArgs,
+    reportEnvironmentMatches,
+    resultMap,
+    run,
+};

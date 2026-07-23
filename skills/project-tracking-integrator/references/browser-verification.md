@@ -48,7 +48,7 @@ node <skill-dir>/scripts/validate-browser-journey.mjs \
   --out /tmp/browser-journey-validation.json
 ```
 
-校验不代替浏览器中的 DOM 唯一性检查；它只保证旅程结构、目标环境和查询次数边界有效。
+校验必须在任何浏览器导航、点击或输入之前完成。它不代替浏览器中的 DOM 唯一性检查；它保证旅程结构、目标环境和查询次数边界有效。production 旅程还会读取 `verification.contract`，校验契约中的生产 origin，并要求所有必验生产事件显式声明 `smokeSafe: true`。校验未通过时返回 `BLOCKED`，不执行任何浏览器动作。
 
 允许的最小动作集：
 
@@ -119,7 +119,7 @@ in-app Browser 可以执行 UI 操作、读取 DOM、确认页面结果并读取
 
 环境、精确事件名和触发时间窗负责从平台获取本次旅程的候选数据；稳定 match 在本地关联同名业务动作。平台返回但埋点契约没有声明的字段不参与验收；契约声明的字段统一按普通属性规则严格比较。
 
-完成操作后等待一个有界的入库延迟再查询。第一次为 `NOT_FOUND` 时至多延迟重查一次；不要高频轮询神策。第二次仍无数据则保持 `NOT_FOUND`，并报告环境、时间窗和 match 条件，不转去做源码审计。
+完成操作后等待一个有界的入库延迟再查询。第一次为 `NOT_FOUND` 时至多延迟重查一次；不要高频轮询神策。第二次仍无数据则保持 `NOT_FOUND`，并报告环境、时间窗和 match 条件，不转去做源码审计。若 API、凭证、权限、SQL 或网络失败，仍写出逐事件的 `QUERY_FAILED` 入库报告。若结果达到查询行数上限，返回 `QUERY_FAILED/RESULT_TRUNCATED`，缩短时间窗或安全提高限制后重试；不能把失败或截断结果判为 `NOT_FOUND` 或 `PASS`。
 
 把浏览器证据保存为可合并的环境报告：
 
