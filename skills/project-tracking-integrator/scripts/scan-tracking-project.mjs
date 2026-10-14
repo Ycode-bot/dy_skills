@@ -1,3 +1,4 @@
+import { isEntrypoint, translateDiagnostic, humanizeReport, withChineseLabels } from './reporting.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -64,16 +65,10 @@ const PLATFORM_RULES = {
     },
 };
 
-const HELP = `Tracking architecture scanner
+const HELP = `扫描项目埋点体系
 
-Usage:
-  node scripts/scan-tracking-project.mjs [--root <project>] [--format markdown|json] [--out <path>]
-
-Options:
-  --root <path>       Project root; defaults to the current directory
-  --format <format>   markdown or json; defaults to markdown
-  --out <path>        Write the report instead of stdout
-  --help              Show this help
+用法：node scripts/scan-tracking-project.mjs [--root <项目目录>] [--format markdown|json] [--out <报告路径>]
+默认扫描当前项目，输出中文 Markdown；--help 显示帮助。扫描证据需继续追踪真实调用。
 `;
 
 function usage(message) {
@@ -294,7 +289,7 @@ function formatMarkdown(report) {
         '|---|---|---|---:|---:|---:|',
     ];
     for (const platform of Object.values(report.platforms)) {
-        lines.push(`| ${platform.label} | ${platform.status} | ${platform.confidence} | ${platform.initialization.length} | ${platform.transports.length + platform.wrappers.length} | ${platform.callSites.length} |`);
+        lines.push(`| ${platform.label} | ${platform.status} | ${({ high: '高', medium: '中', low: '低' })[platform.confidence] || '待确认'} | ${platform.initialization.length} | ${platform.transports.length + platform.wrappers.length} | ${platform.callSites.length} |`);
     }
     const present = Object.entries(report.platforms).filter(([, platform]) => platform.status !== 'absent');
     for (const [key, platform] of present) {
@@ -308,14 +303,14 @@ function formatMarkdown(report) {
     }
     if (report.risks.length > 0) {
         lines.push('', '## 风险', '');
-        for (const risk of report.risks) lines.push(`- ${risk.platform}/${risk.code}：${risk.message} ${risk.evidence.join('、')}`);
+        for (const risk of report.risks) lines.push(`- ${risk.platform}：${risk.message} ${risk.evidence.join('、')}`);
     }
     lines.push('', '## 基础能力', '',
         `- 身份处理证据：${report.foundations.identity.length || 0} 个文件`,
         `- 埋点文档证据：${report.foundations.documentation.length || 0} 个文件`,
         `- 自动校验证据：${report.foundations.validation.length || 0} 个文件`, '',
         '## 限制', '', ...report.limitations.map(item => `- ${item}`), '');
-    return lines.join('\n');
+    return humanizeReport(lines.join('\n'));
 }
 
 async function run(argv = process.argv.slice(2)) {
@@ -325,7 +320,7 @@ async function run(argv = process.argv.slice(2)) {
         return 0;
     }
     const report = scanProject(await readProject(options.root));
-    const output = options.format === 'json' ? `${JSON.stringify(report, null, 2)}\n` : formatMarkdown(report);
+    const output = options.format === 'json' ? `${JSON.stringify(withChineseLabels(report), null, 2)}\n` : formatMarkdown(report);
     if (options.out) {
         await fs.mkdir(path.dirname(path.resolve(options.out)), { recursive: true });
         await fs.writeFile(options.out, output, 'utf8');
@@ -334,10 +329,10 @@ async function run(argv = process.argv.slice(2)) {
     return 0;
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+const isMain = isEntrypoint(import.meta.url);
 if (isMain) {
     run().then(code => { process.exitCode = code; }).catch(error => {
-        process.stderr.write(`Error: ${error.message}\n`);
+        process.stderr.write(`错误：${translateDiagnostic(error.message)}\n`);
         process.exitCode = error.isUsageError ? 2 : 3;
     });
 }

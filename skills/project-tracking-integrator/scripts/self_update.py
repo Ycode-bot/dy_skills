@@ -47,32 +47,32 @@ STATE_SCHEMA_VERSION = 1
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=f"Update {SKILL_NAME} from GitHub.")
+    parser = argparse.ArgumentParser(description=f"从 GitHub 更新 {SKILL_NAME}。")
     parser.add_argument(
         "--source",
         default=os.environ.get(SOURCE_ENV, DEFAULT_SOURCE),
-        help="GitHub source in owner/repo@skill form",
+        help="GitHub 来源，格式 owner/repo@skill",
     )
-    parser.add_argument("--dest", required=True, help="Installed skill directory")
-    parser.add_argument("--ref", default=os.environ.get(REF_ENV, DEFAULT_REF), help="Git ref")
-    parser.add_argument("--timeout", type=int, default=20, help="Network timeout in seconds")
-    parser.add_argument("--check-only", action="store_true", help="Report an update without installing it")
+    parser.add_argument("--dest", required=True, help="已安装的 skill 目录")
+    parser.add_argument("--ref", default=os.environ.get(REF_ENV, DEFAULT_REF), help="Git 分支或引用")
+    parser.add_argument("--timeout", type=int, default=20, help="网络超时秒数")
+    parser.add_argument("--check-only", action="store_true", help="只检查更新，不安装")
     parser.add_argument(
         "--force",
         action="store_true",
         default=os.environ.get(FORCE_UPDATE_ENV, "0").strip().lower() in {"1", "true", "yes", "on"},
-        help="Bypass the local check interval and contact GitHub now",
+        help="跳过检查缓存，立即检查 GitHub",
     )
     parser.add_argument(
         "--interval-hours",
         type=float,
         default=os.environ.get(CHECK_INTERVAL_ENV, str(DEFAULT_CHECK_INTERVAL_HOURS)),
-        help=f"Minimum hours between automatic checks; default {DEFAULT_CHECK_INTERVAL_HOURS:g}",
+        help=f"检查缓存小时数，默认 {DEFAULT_CHECK_INTERVAL_HOURS:g}",
     )
     parser.add_argument(
         "--allow-git-checkout",
         action="store_true",
-        help="Allow replacing files inside a Git working tree",
+        help="允许替换 Git 工作区中的 skill 文件",
     )
     return parser.parse_args(argv)
 
@@ -132,9 +132,9 @@ def cache_is_fresh(state: dict, source: str, ref: str, now: float) -> bool:
 def project_tracking_integrator_cached_message(state: dict) -> str:
     try:
         next_check = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(state["next_check_at"])))
-        return f"{SKILL_NAME} update check cached until {next_check}; use --force to check now."
+        return f"{SKILL_NAME} 更新检查结果缓存至 {next_check}；明确需要立即检查时使用 --force。"
     except (KeyError, TypeError, ValueError, OSError):
-        return f"{SKILL_NAME} update check is cached; use --force to check now."
+        return f"{SKILL_NAME} 更新检查结果已缓存；明确需要立即检查时使用 --force。"
 
 
 def build_update_state(
@@ -334,7 +334,7 @@ def update_lock(destination: Path):
     except FileExistsError:
         age = time.time() - lock.stat().st_mtime
         if age <= LOCK_STALE_SECONDS:
-            raise RuntimeError("another update check is already running")
+            raise RuntimeError("已有更新检查正在运行")
         shutil.rmtree(lock, ignore_errors=True)
         lock.mkdir()
     try:
@@ -343,22 +343,45 @@ def update_lock(destination: Path):
         shutil.rmtree(lock, ignore_errors=True)
 
 
+def update_error_zh(exc: Exception) -> str:
+    message = str(exc)
+    translations = {
+        "offline": "网络不可用，请恢复网络后重试",
+        "another update check is already running": "已有更新检查正在运行",
+        "source must use owner/repo@skill with safe GitHub path characters": "更新来源格式无效，应使用 owner/repo@skill",
+        "revision check returned no commits for the Skill path": "远端未找到此 skill 路径的提交",
+        "revision check returned an invalid commit SHA": "远端返回的提交标识无效",
+        "download exceeded the 100 MiB safety limit": "下载超过 100 MiB 限制",
+        "archive contains an unsafe path": "压缩包包含不安全路径",
+        "archive contains a symbolic link": "压缩包包含符号链接",
+        "archive exceeded the 250 MiB extraction safety limit": "解压超过 250 MiB 限制",
+        "unexpected GitHub archive layout": "远端压缩包目录结构不符合预期",
+    }
+    if message in translations:
+        return translations[message]
+    if any(token in message.lower() for token in ("timeout", "timed out", "download failed", "revision check failed", "offline")):
+        return "远端查询或下载失败，请检查网络、来源地址及访问权限"
+    if any("\u4e00" <= char <= "\u9fff" for char in message):
+        return message
+    return f"更新条件不满足（{type(exc).__name__}），请检查来源配置、目标目录权限和远端文件完整性"
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     automatic_disabled = os.environ.get(AUTO_UPDATE_ENV, "1").strip().lower() in {"0", "false", "no", "off"}
     if automatic_disabled and not args.force and not args.check_only:
-        print(f"{SKILL_NAME} auto-update is disabled for this run.", file=sys.stderr)
+        print(f"{SKILL_NAME} 本次已禁用更新。", file=sys.stderr)
         return 0
 
     destination = Path(args.dest).expanduser().resolve()
     if not destination.is_dir():
-        print(f"{SKILL_NAME} self-update failed: destination not found: {destination}", file=sys.stderr)
+        print(f"{SKILL_NAME} 更新失败：目标目录不存在： {destination}", file=sys.stderr)
         return 1
     if is_git_checkout(destination) and not args.allow_git_checkout:
-        print(f"{SKILL_NAME} auto-update skipped inside a Git working tree.", file=sys.stderr)
+        print(f"{SKILL_NAME} 目标位于 Git 工作区，已跳过替换。", file=sys.stderr)
         return 0
     if args.interval_hours < 0:
-        print(f"{SKILL_NAME} self-update failed: --interval-hours must be non-negative", file=sys.stderr)
+        print(f"{SKILL_NAME} 更新失败：--interval-hours 必须为非负数", file=sys.stderr)
         return 1
 
     try:
@@ -392,7 +415,7 @@ def main(argv: list[str] | None = None) -> int:
                     current_remote_sha=remote_revision,
                     local_digest=current_digest,
                 ))
-                print(f"{SKILL_NAME} is already up to date.", file=sys.stderr)
+                print(f"{SKILL_NAME} 已经是最新版本。", file=sys.stderr)
                 return 0
             if args.check_only and current_revision:
                 write_update_state(destination, build_update_state(
@@ -404,7 +427,7 @@ def main(argv: list[str] | None = None) -> int:
                     result="update-available",
                     update_available=True,
                 ))
-                print(f"{SKILL_NAME} update is available.", file=sys.stderr)
+                print(f"{SKILL_NAME} 发现可用更新。", file=sys.stderr)
                 return 2
             with tempfile.TemporaryDirectory(prefix=f"{SKILL_NAME}-update-") as temporary:
                 workdir = Path(temporary)
@@ -425,7 +448,7 @@ def main(argv: list[str] | None = None) -> int:
                         current_remote_sha=remote_revision,
                         local_digest=current_digest,
                     ))
-                    print(f"{SKILL_NAME} is already up to date.", file=sys.stderr)
+                    print(f"{SKILL_NAME} 已经是最新版本。", file=sys.stderr)
                     return 0
                 if args.check_only:
                     write_update_state(destination, build_update_state(
@@ -437,7 +460,7 @@ def main(argv: list[str] | None = None) -> int:
                         result="update-available",
                         update_available=True,
                     ))
-                    print(f"{SKILL_NAME} update is available.", file=sys.stderr)
+                    print(f"{SKILL_NAME} 发现可用更新。", file=sys.stderr)
                     return 2
                 atomic_install(source, destination)
                 installed_digest = tree_digest(destination)
@@ -452,7 +475,7 @@ def main(argv: list[str] | None = None) -> int:
                     local_digest=installed_digest,
                 ))
                 print(
-                    f"{SKILL_NAME} installed the latest files from "
+                    f"{SKILL_NAME} 已安装最新文件，来源："
                     f"{owner}/{repo}@{args.ref} (skills/{remote_skill}).",
                     file=sys.stderr,
                 )
@@ -472,7 +495,7 @@ def main(argv: list[str] | None = None) -> int:
             ))
         except Exception:
             pass
-        print(f"{SKILL_NAME} self-update failed: {exc}", file=sys.stderr)
+        print(f"{SKILL_NAME} 更新失败：{update_error_zh(exc)}", file=sys.stderr)
         return 1
 
 

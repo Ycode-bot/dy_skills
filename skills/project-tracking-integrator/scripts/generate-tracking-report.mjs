@@ -1,3 +1,4 @@
+import { isEntrypoint, translateDiagnostic, humanizeReport, withChineseLabels, issueDetails, formatIssue, statusLabel } from './reporting.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -10,20 +11,14 @@ const ENVIRONMENT_ORDER = ['local', 'qa', 'production'];
 const READY_STATES = { local: 'LOCAL_READY', qa: 'QA_READY', production: 'PRODUCTION_VERIFIED' };
 const EVIDENCE_STAGES = ['source', 'browser', 'runtime', 'ingestion'];
 
-const HELP = `Tracking acceptance report generator
+const HELP = `埋点验收报告汇总
 
-Usage:
-  node scripts/generate-tracking-report.mjs --spec <contract.json> [options]
-
-Options:
-  --scan <report.json>        Project scan JSON
-  --source <report.json>      Source verification JSON; repeatable
-  --browser <report.json>     Browser journey JSON; repeatable by environment
-  --runtime <report.json>     SDK/payload verification JSON; repeatable by environment
-  --ingestion <report.json>   Platform ingestion JSON; repeatable by environment
-  --format <markdown|json>    Default: markdown
-  --out <path>                Write report instead of stdout
-  --help                      Show this help
+用法：node scripts/generate-tracking-report.mjs --spec <contract.json> [参数]
+--mode full-lifecycle：完整闭环，要求源码、浏览器、平台和开发证据；默认 full-lifecycle；--mode legacy 显式兼容旧报告。
+--development <report.json>：业务影响与文档证据。
+--scan <report.json>：体系扫描。
+--source / --browser / --runtime / --ingestion <report.json>：对应阶段报告，可重复传入。
+--format markdown|json：默认中文 Markdown；--out 保存文件；--help 显示帮助。
 `;
 
 function usage(message) {
@@ -34,10 +29,10 @@ function usage(message) {
 
 function parseArgs(argv) {
     const options = {
-        spec: '', scan: '', source: [], browser: [], runtime: [], ingestion: [], format: 'markdown', out: '', help: false,
+        spec: '', scan: '', mode: 'full-lifecycle', development: '', source: [], browser: [], runtime: [], ingestion: [], format: 'markdown', out: '', help: false,
     };
     const repeatable = new Set(['--source', '--browser', '--runtime', '--ingestion']);
-    const single = new Set(['--spec', '--scan', '--format', '--out']);
+    const single = new Set(['--spec', '--scan', '--format', '--out', '--mode', '--development']);
     for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
         if (arg === '--help') {
@@ -51,6 +46,7 @@ function parseArgs(argv) {
         if (repeatable.has(arg)) options[key].push(value);
         else options[key] = value;
     }
+    if (!['legacy', 'full-lifecycle'].includes(options.mode)) usage('--mode 仅支持 legacy 或 full-lifecycle');
     if (!options.help && !options.spec) usage('--spec is required');
     if (!['markdown', 'json'].includes(options.format)) usage('--format must be markdown or json');
     return options;
@@ -92,7 +88,7 @@ function orderedEnvironments(contract) {
     });
 }
 
-function contractRows(contract) {
+function contractRows(contract, mode = 'legacy') {
     if (!contract || !Array.isArray(contract.events) || contract.events.length === 0) usage('contract.events must contain at least one event');
     const rows = [];
     const environments = orderedEnvironments(contract);
@@ -115,7 +111,7 @@ function contractRows(contract) {
                     environment: '',
                     environmentStatus: 'required',
                     smokeSafe: null,
-                    requiredEvidence: defaultEvidence(platform),
+                    requiredEvidence: mode === 'full-lifecycle' ? ['source', 'browser', 'ingestion'] : defaultEvidence(platform),
                 });
                 continue;
             }
@@ -128,7 +124,7 @@ function contractRows(contract) {
                     environment,
                     environmentStatus: requirement.status || 'unknown',
                     smokeSafe: requirement.smokeSafe ?? null,
-                    requiredEvidence: requirement.evidence?.length
+                    requiredEvidence: mode === 'full-lifecycle' ? [...new Set(['source', 'browser', 'ingestion', ...(requirement.evidence || [])])] : requirement.evidence?.length
                         ? requirement.evidence
                         : defaultEvidence(platform, environment),
                 });
@@ -196,26 +192,30 @@ function resultMap(reportValue, defaultPlatform = '', { contract = null, require
         for (const result of report?.results || []) {
             const platform = result.platform || defaultPlatform;
             const environment = environmentName(result.environment) || reportEnvironment;
-            const normalizedResult = environmentMismatch ? { ...result, status: 'QUERY_FAILED' } : result;
-            map.set(`${result.id}::${platform}::${environment}`, normalizedResult);
-            if (!platform) map.set(`${result.id}::::${environment}`, normalizedResult);
+            const environmentConflict = Boolean(reportEnvironment && environment !== reportEnvironment);
+            let normalizedResult = (environmentMismatch || environmentConflict) ? { ...result, status: 'QUERY_FAILED', issues: [issueDetails({ message: '报告环境、事件环境或环境过滤与契约不一致', nextStep: '使用正确环境重新查询' })] } : result;
+            if (!environmentMismatch && !environmentConflict && result.method === 'agent-review' && (!Array.isArray(result.evidence) || !result.evidence.length)) {
+                normalizedResult = { ...result, status: 'NEEDS_REVIEW', issues: [issueDetails({ message: '人工补查报告缺少可定位的证据', nextStep: '补充位置、检查过程及结论依据' })] };
+            }
+            map.set(`${result.id}::${platform}::${environment}`, { result: normalizedResult, report });
+            if (!platform) map.set(`${result.id}::::${environment}`, { result: normalizedResult, report });
         }
     }
     return map;
 }
 
-function stageStatus(map, row, { fallbackPlatform = '', allowGlobal = false } = {}) {
+function stageEvidence(map, row, { fallbackPlatform = '', allowGlobal = false } = {}) {
     const environments = allowGlobal && row.environment ? [row.environment, ''] : [row.environment];
     const platforms = fallbackPlatform && fallbackPlatform !== row.platform
         ? [row.platform, fallbackPlatform, '']
         : [row.platform, ''];
     for (const environment of environments) {
         for (const platform of platforms) {
-            const status = map.get(`${row.id}::${platform}::${environment}`)?.status;
-            if (status) return status;
+            const evidence = map.get(`${row.id}::${platform}::${environment}`);
+            if (evidence) return evidence;
         }
     }
-    return 'NOT_RUN';
+    return null;
 }
 
 function finalStatus(row) {
@@ -264,7 +264,7 @@ function buildGates(results) {
     return gates;
 }
 
-function buildReport({ contract, scan = null, source = null, browser = null, runtime = null, ingestion = null }) {
+function buildReport({ contract, scan = null, source = null, browser = null, runtime = null, ingestion = null, mode = 'legacy', development = null }) {
     const sourceReports = asReports(source);
     const browserReports = asReports(browser);
     const runtimeReports = asReports(runtime);
@@ -276,40 +276,92 @@ function buildReport({ contract, scan = null, source = null, browser = null, run
         contract,
         requireEnvironmentEvidence: true,
     });
-    const results = contractRows(contract).map(row => {
+    const results = contractRows(contract, mode).map(row => {
         const result = {
             ...row,
+            issues: [],
+            evidenceDetails: {},
             requirement: row.targetStatus === 'unknown' || row.environmentStatus === 'unknown'
                 || (row.environment === 'production' && row.smokeSafe !== true)
                 ? 'BLOCKED'
                 : 'PASS',
         };
+        const selectedEvidence = {};
         for (const stage of EVIDENCE_STAGES) {
             if (!row.requiredEvidence.includes(stage)) {
                 result[stage] = 'NOT_REQUIRED';
                 continue;
             }
             const map = { source: sourceMap, browser: browserMap, runtime: runtimeMap, ingestion: ingestionMap }[stage];
-            result[stage] = stageStatus(map, row, {
+            selectedEvidence[stage] = stageEvidence(map, row, {
                 fallbackPlatform: stage === 'ingestion' && row.platform === 'sensors' ? 'sensors' : '',
                 allowGlobal: stage === 'source',
             });
+            result[stage] = selectedEvidence[stage]?.result.status || 'NOT_RUN';
+            const selected = selectedEvidence[stage]?.result;
+            if (stage === 'source' && mode === 'full-lifecycle' && selected?.scope === 'method') {
+                result[stage] = 'NEEDS_REVIEW';
+                result.issues.push(issueDetails({ message: '源码报告仅检查方法，尚未验证业务调用点', nextStep: '运行 integration 范围检查，或提供覆盖调用点的 Agent 补查证据' }));
+            }
+            if (stage === 'browser' && selected?.status === 'NOT_AVAILABLE' && selected.pageStatus === 'PASS') result[stage] = 'PASS';
             if (stage === 'ingestion'
                 && result[stage] === 'NOT_RUN'
                 && hasInvalidIngestionEvidence(ingestionReports, contract, row)) {
                 result[stage] = 'QUERY_FAILED';
             }
         }
+        for (const stage of row.requiredEvidence) {
+            const item = selectedEvidence[stage]?.result;
+            if (item) {
+                result.evidenceDetails[stage] = item;
+                if (item.event && item.event !== row.event) {
+                    result[stage] = 'CONTRACT_MISMATCH';
+                    result.issues.push(issueDetails({ message: `${statusLabel(stage)}报告的事件名与本次契约不一致`, nextStep: '提供本次目标事件的证据' }));
+                }
+            }
+            const reasons = item?.issues?.length ? item.issues : result[stage] !== 'PASS'
+                ? [{ message: `${statusLabel(stage)}：${statusLabel(result[stage])}`, nextStep: `补齐${statusLabel(stage)}证据后重新验收` }] : [];
+            result.issues.push(...reasons.map(issue => ({ stage, ...issueDetails(typeof issue === 'string' ? { message: issue } : issue) })));
+        }
+        if (mode === 'full-lifecycle') {
+            const browserEvidence = selectedEvidence.browser?.report;
+            const ingested = result.evidenceDetails.ingestion;
+            const trigger = browserEvidence?.triggerWindow;
+            const queryWindow = ingested?.queryWindow;
+            if (!trigger?.startedAt || !trigger?.finishedAt || !queryWindow?.startedAt || !queryWindow?.finishedAt
+                || Date.parse(trigger.startedAt) !== Date.parse(queryWindow.startedAt)
+                || Date.parse(trigger.finishedAt) !== Date.parse(queryWindow.finishedAt)) {
+                if (!FAILURE_STATUSES.has(result.ingestion) && result.ingestion !== 'BLOCKED') result.ingestion = 'NEEDS_REVIEW';
+                result.issues.push(issueDetails({ message: '浏览器触发窗口与入库查询窗口缺失或不一致，不能关联本轮验收', nextStep: '修复后用新窗口重跑浏览器及平台验收，并保留相同时间证据' }));
+            }
+        }
         result.status = finalStatus(result);
         return result;
     });
     const gates = orderedEnvironments(contract).length > 0 ? buildGates(results) : {};
-    let status = 'PASS';
+    let status = results.length ? 'PASS' : 'BLOCKED';
     if (results.some(result => FAILURE_STATUSES.has(result.status))) status = 'FAILED';
     else if (results.some(result => result.status === 'BLOCKED') || Object.values(gates).some(gate => gate.status === 'BLOCKED')) status = 'BLOCKED';
     else if (results.some(result => result.status !== 'PASS') || Object.values(gates).some(gate => !['PASS', 'NOT_REQUIRED'].includes(gate.status))) status = 'INCOMPLETE';
+    const developmentIssues = [];
+    if (!results.length) developmentIssues.push(issueDetails({ message: '契约中没有可验收的必需事件，不能给出通过结论', nextStep: '明确本次必需目标与验收范围' }));
+    if (mode === 'full-lifecycle') {
+        if (!Object.keys(contract.environments || {}).length) {
+            developmentIssues.push(issueDetails({ message: '完整闭环缺少明确验收环境', nextStep: '在契约中声明本次测试地址与环境过滤' }));
+        }
+        for (const stage of ['businessImpact', 'documentation']) {
+            const evidence = development?.[stage];
+            if (evidence?.status !== 'PASS' || !evidence?.evidence?.length || (stage === 'businessImpact' && evidence.risk !== 'low')) {
+                developmentIssues.push(issueDetails({ message: stage === 'businessImpact' ? '业务影响检查未完成或仍有未解除的影响' : '文档同步缺少完成证据', location: evidence?.path, nextStep: '完成该阶段并补充可定位的证据' }));
+            }
+        }
+        if (developmentIssues.length && status === 'PASS') status = 'INCOMPLETE';
+    }
     return {
         schemaVersion: 2,
+        mode,
+        developmentIssues,
+        development,
         generatedAt: new Date().toISOString(),
         status,
         architecture: scan ? {
@@ -338,19 +390,25 @@ function buildReport({ contract, scan = null, source = null, browser = null, run
 
 function formatMarkdown(report) {
     const lines = [
-        '# 埋点端到端验收报告', '',
+        report.mode === 'full-lifecycle' ? '# 埋点闭环验收报告' : '# 埋点阶段证据报告', '',
         `- 生成时间：${report.generatedAt}`,
         `- 总体状态：${report.status}`,
         `- 通过：${report.summary.passed}/${report.summary.total}`,
         `- 证据：架构扫描=${report.evidence.scan ? '有' : '无'}，源码=${report.evidence.source}，浏览器=${report.evidence.browser}，运行时=${report.evidence.runtime}，入库=${report.evidence.ingestion}`, '',
     ];
     if (Object.keys(report.gates).length > 0) {
-        lines.push('## 环境晋级门禁', '', '| 环境 | 证据状态 | 门禁状态 | 就绪状态 | 阻塞来源 |', '|---|---|---|---|---|');
+        lines.push('## 环境验收状态', '', '| 环境 | 证据状态 | 门禁状态 | 就绪状态 | 阻塞来源 |', '|---|---|---|---|---|');
         for (const environment of ENVIRONMENT_ORDER) {
             const gate = report.gates[environment];
-            lines.push(`| ${environment} | ${gate.evidenceStatus} | ${gate.status} | ${gate.readiness} | ${gate.blockedBy || '-'} |`);
+            if (gate.evidenceStatus === 'NOT_REQUIRED') continue;
+            lines.push(`| ${statusLabel(environment)} | ${gate.evidenceStatus} | ${gate.status} | ${gate.readiness} | ${gate.blockedBy ? statusLabel(gate.blockedBy) : '-'} |`);
         }
         lines.push('');
+    }
+    if (report.development) {
+        lines.push('', '## 开发证据', '',
+            `- 业务影响：${statusLabel(report.development.businessImpact?.status)}；风险：${({low:'低',medium:'待补查',high:'高'})[report.development.businessImpact?.risk] || '尚未确定'}`,
+            `- 文档：${report.development.documentation?.path || '见项目现有文档'}；${statusLabel(report.development.documentation?.status)}`);
     }
     if (report.architecture) {
         lines.push('## 埋点体系', '', `- 总体分类：${report.architecture.classification}`);
@@ -364,20 +422,25 @@ function formatMarkdown(report) {
         '| 业务事件 | 平台 | 环境 | 需求 | 源码 | 浏览器 | SDK/请求 | 平台入库 | 最终结果 |',
         '|---|---|---|---|---|---|---|---|---|');
     for (const result of report.results) {
-        lines.push(`| ${result.businessEvent} | ${result.platform} | ${result.environment || '-'} | ${result.requirement} | ${result.source} | ${result.browser} | ${result.runtime} | ${result.ingestion} | ${result.status} |`);
+        lines.push(`| ${result.businessEvent} | ${result.platform} | ${result.environment ? statusLabel(result.environment) : '-'} | ${result.requirement} | ${result.source} | ${result.browser} | ${result.runtime} | ${result.ingestion} | ${result.status} |`);
     }
+    for (const result of report.results) {
+        if (result.evidenceDetails?.browser?.status === 'NOT_AVAILABLE') lines.push(`- ${result.id}：页面结果与发送证据分开记录；SDK/发送证据当前无法获取。`);
+    }
+    for (const issue of report.developmentIssues || []) lines.push(`- ${formatIssue(issue)}`);
     const incomplete = report.results.filter(result => result.status !== 'PASS');
     if (incomplete.length > 0) {
         lines.push('', '## 待处理', '');
         for (const result of incomplete) {
             const label = `${result.id}/${result.platform}/${result.environment || 'legacy'}`;
+            for (const issue of result.issues || []) lines.push(`- ${label}：${formatIssue(issue)}`);
             if (result.status === 'BLOCKED') lines.push(`- ${label}：环境要求、目标定义或 production smokeSafe 尚未满足。`);
             else if (result.status === 'INCOMPLETE') lines.push(`- ${label}：必需证据尚未收齐。`);
             else lines.push(`- ${label}：${result.status}，查看对应阶段的差异报告。`);
         }
     }
     lines.push('');
-    return lines.join('\n');
+    return humanizeReport(lines.join('\n'));
 }
 
 async function run(argv = process.argv.slice(2)) {
@@ -388,13 +451,15 @@ async function run(argv = process.argv.slice(2)) {
     }
     const report = buildReport({
         contract: await readJson(options.spec),
+        mode: options.mode,
+        development: await readJson(options.development),
         scan: await readJson(options.scan),
         source: await readJsonList(options.source),
         browser: await readJsonList(options.browser),
         runtime: await readJsonList(options.runtime),
         ingestion: await readJsonList(options.ingestion),
     });
-    const output = options.format === 'json' ? `${JSON.stringify(report, null, 2)}\n` : formatMarkdown(report);
+    const output = options.format === 'json' ? `${JSON.stringify(withChineseLabels(report), null, 2)}\n` : formatMarkdown(report);
     if (options.out) {
         await fs.mkdir(path.dirname(path.resolve(options.out)), { recursive: true });
         await fs.writeFile(options.out, output, 'utf8');
@@ -403,10 +468,10 @@ async function run(argv = process.argv.slice(2)) {
     return report.status === 'PASS' ? 0 : 1;
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+const isMain = isEntrypoint(import.meta.url);
 if (isMain) {
     run().then(code => { process.exitCode = code; }).catch(error => {
-        process.stderr.write(`Error: ${error.message}\n`);
+        process.stderr.write(`错误：${translateDiagnostic(error.message)}\n`);
         process.exitCode = error.isUsageError ? 2 : 3;
     });
 }

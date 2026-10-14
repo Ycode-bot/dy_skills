@@ -394,8 +394,9 @@ test('default PASS cleanup removes only its marker-owned session', async t => {
         finalReport: report('PASS'),
     };
     const artifacts = await finalizeSession({ paths, bundle: defaultBundle(), workflow });
-    assert.equal(artifacts.cleaned, true);
-    await assert.rejects(fs.access(paths.session));
+    assert.equal(artifacts.cleaned, false);
+    assert.deepEqual(JSON.parse(await fs.readFile(artifacts.ingestionEvidence, 'utf8')), workflow.finalReport);
+    assert.deepEqual(JSON.parse(await fs.readFile(artifacts.browserEvidence, 'utf8')), defaultBundle().browserReport);
     assert.equal(await fs.readFile(path.join(sibling, 'keep.txt'), 'utf8'), 'keep');
 });
 
@@ -514,7 +515,7 @@ test('failure collapse rechecks ownership before removing session entries', asyn
     await fs.access(paths.bundle);
 });
 
-test('executeSession consumes the editable bundle and cleans up after PASS', async t => {
+test('executeSession retains aggregate evidence after PASS', async t => {
     const temporaryRoot = await temporaryDirectory(t);
     const paths = await createOwnedSession({ temporaryRoot });
     const bundle = executableBundle();
@@ -529,7 +530,9 @@ test('executeSession consumes the editable bundle and cleans up after PASS', asy
     });
     assert.equal(result.status, 'PASS');
     assert.equal(browserPaths[0], paths.browserReport);
-    await assert.rejects(fs.access(paths.session));
+    await fs.access(result.artifacts.browserEvidence);
+    await fs.access(result.artifacts.ingestionEvidence);
+    await assert.rejects(fs.access(paths.bundle));
 });
 
 test('executeSession blocks an invalid browser report before waiting or querying', async t => {
@@ -655,4 +658,24 @@ test('executeSession reports missing query configuration as BLOCKED', async t =>
     assert.equal(result.status, 'BLOCKED');
     assert.match(result.error, /credentials are not configured/);
     assert.deepEqual((await fs.readdir(paths.session)).sort(), [DEBUG_BUNDLE_NAME, FINAL_REPORT_NAME].sort());
+});
+
+test('validated page evidence survives unavailable SDK visibility and artifact export', async t => {
+    const {browserEvidenceReport}=await import('./run-browser-ingestion-verification.mjs');
+    const bundle=executableBundle();
+    bundle.browserReport.results[0].status='NOT_AVAILABLE';
+    const evidence=browserEvidenceReport(bundle);
+    assert.equal(evidence.results[0].status,'NOT_AVAILABLE');
+    assert.equal(evidence.results[0].pageStatus,'PASS');
+    assert.equal(bundle.browserReport.results[0].pageStatus,undefined);
+    const temporaryRoot=await temporaryDirectory(t);
+    for(const keepArtifacts of [false,true]) {
+        const paths=await createOwnedSession({temporaryRoot});
+        const artifacts=await finalizeSession({paths,bundle,workflow:{status:'PASS',attempts:[],finalReport:report('PASS')},keepArtifacts});
+        const saved=JSON.parse(await fs.readFile(artifacts.browserEvidence,'utf8'));
+        assert.equal(saved.results[0].pageStatus,'PASS');
+        assert.equal(saved.results[0].status,'NOT_AVAILABLE');
+    }
+    bundle.browserReport.steps[1].status='FAILED';
+    assert.equal(browserEvidenceReport(bundle).results[0].pageStatus,undefined);
 });

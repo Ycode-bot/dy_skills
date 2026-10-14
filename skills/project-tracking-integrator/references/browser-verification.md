@@ -17,19 +17,17 @@
 1. 浏览器确实完成了指定业务操作，页面出现了预期结果。
 2. 分析平台按同一事件、环境和触发时间返回候选数据，本地稳定字段关联后的入库事件满足契约。
 
-这个模式不自动扫描仓库、不修改源码，也不补做 GA/GTM 等无关平台审计。若用户同时要求实现和自动验收，按 `instrument → browser-verify` 组合执行。
+这个模式不自动扫描仓库、不修改源码，也不补做 GA/GTM 等无关平台审计。完整埋点开发默认在业务影响检查与文档之后进入本阶段；明确限定阶段时遵从用户范围。
 
 ## 2. 开始前的最小输入
 
-### Browser 插件依赖
+### 浏览器能力与登录
 
-浏览器自动验收依赖 Codex 的 [@Browser](plugin://browser@openai-bundled) 插件，以及它提供的 `browser:control-in-app-browser` Skill。开始前先检查本次会话的可用 Skill：
+按用户指定工具优先，否则复用合适的现有登录会话。可使用内置浏览器、CUA 或 Chrome DevTools；读取本次工具实际文档，确认支持读取 DOM、唯一定位、执行动作、验证可见结果和记录时间。缺旧插件名称不构成阻塞。只有必要能力缺失才说明具体原因及可用替代；不能用坐标盲点代替 DOM 证据。
 
-- 已列出 `browser:control-in-app-browser`：完整读取其 `SKILL.md`，按插件规范建立浏览器连接。
-- 未列出：返回 `BLOCKED`，明确提示“缺少 Browser 插件。请在 Codex 的插件面板安装或启用 Browser（OpenAI bundled），重新打开任务后再运行浏览器验收。”
-- Skill 已列出但插件内缺少 `scripts/browser-client.mjs`：提示 Browser 插件安装不完整，请从 Codex 插件面板重新安装。
+需要登录时先检查可见登录状态。未登录请用户在选定的同一会话完成登录并回复“已登录”；等待期间只继续无登录依赖的工作。回复后重新确认页面登录证据再继续，不能把回复本身当作登录成功证明。中途失效时暂停，按同样流程恢复。登录本身为待测事件时，将用户登录操作纳入正式旅程与时间窗。不得读取 Cookie 或存储恢复凭证。
 
-不要因为插件缺失而静默切换到独立 Playwright、Computer Use、外部浏览器 MCP 或其他自动化实现。安装或启用插件属于用户操作；Skill 只诊断并给出明确步骤，不自行修改 Codex 插件状态。
+工具选定后记录实际提供者及能力；主执行环境、控制台或网络捕获能力未知时不能假定可用。工具变更必须重新确认同一测试环境和登录状态，不能无说明切换会话。
 
 ### 业务验收输入
 
@@ -81,7 +79,7 @@ node <skill-dir>/scripts/validate-browser-journey.mjs \
 
 ## 4. 浏览器执行规则
 
-必须使用 Codex 的 in-app Browser 能力及其现有登录会话。开始浏览器操作前先读取对应 Browser Skill 的完整说明。
+使用选定浏览器及其已确认的登录会话，遵守该工具的实际能力和文档。
 
 local 旅程开始前先检查 `startUrl` 是否可访问。不可访问时，按仓库说明启动标准开发服务并记录进程；验收结束后只关闭本次启动的服务。完整规则见 [environment-gates.md](environment-gates.md)。
 
@@ -115,13 +113,13 @@ locator 优先级：
 
 ## 5. 证据边界
 
-in-app Browser 可以执行 UI 操作、读取 DOM、确认页面结果并读取浏览器控制台日志，但不提供通用 Network 请求拦截。因此：
+不同浏览器工具的捕获能力不同，只按本次实际能力收集证据：
 
 - 页面成功：证明业务旅程完成，不证明埋点发送或入库。
 - SDK 控制台日志：仅在日志真实存在时作为可选发送证据，并对用户标识和属性值脱敏；读取不到页面全局对象时标记 `NOT_AVAILABLE`。
 - 神策 API 查询结果：是 `browser-verify` 的必需入库证据。
 
-如果团队需要验证精确的发送请求体，优先让应用在 QA 环境为统一 track wrapper 增加可关闭、脱敏的 debug 输出，或由用户提供 DevTools/代理捕获的 JSON。不能把普通控制台消息描述成 Network 抓包。
+如果团队需要验证精确的发送请求体，优先让应用在 QA 环境为统一 track wrapper 增加可关闭、脱敏的 debug 输出，或由用户提供 DevTools/代理捕获的 JSON。具备真实 Network 捕获能力的工具可直接记录脱敏请求证据；不能把普通控制台消息描述成 Network 抓包。
 
 ## 6. 时间和环境关联
 
@@ -134,7 +132,7 @@ in-app Browser 可以执行 UI 操作、读取 DOM、确认页面结果并读取
 - 浏览器报告中的固定 `startedAt`—`finishedAt` 触发区间；
 - 事件期望次数；
 
-查询平台。环境值不能包含协议或路径。ImaStudio 使用：local `lmweb_url LIKE '%localhost:端口%'`、QA `LIKE '%qa.imastudio.com%'`、production `LIKE '%www.imastudio.com%'`。
+查询平台。环境值不能包含协议或路径。SQL 包含条件仅获取候选，返回后对 URL.host 做精确比较（含端口），再关联业务字段；环境值无法解析不得判通过。ImaStudio 使用：local `lmweb_url LIKE '%localhost:端口%'`、QA `LIKE '%qa.imastudio.com%'`、production `LIKE '%www.imastudio.com%'`。
 
 把上述字段和逐步执行证据写入 bundle 的 `browserReport`，先做强校验：
 
@@ -197,7 +195,7 @@ Version 3 浏览器报告至少包含逐步定位证据和可合并的事件结�
 }
 ```
 
-产物策略由 runner 统一处理：它只在 canonical marker-owned session 内原子写入，遇到 session、父目录或产物文件软链时立即拒绝，不跟随链接写到目录外。验收 `PASS` 时删除自己创建的临时 session；失败时只保留 `final-report.md` 与 `debug-bundle.json`；只有用户明确要求调试时才传 `--keep-artifacts` 保留全部中间文件。不要把每次运行产生的契约、旅程、浏览器报告和每次查询结果作为用户可见交付物。
+产物策略由 runner 统一处理：它只在 canonical marker-owned session 内原子写入，遇到 session、父目录或产物文件软链时立即拒绝，不跟随链接写到目录外。验收通过时只保留 marker、中文报告、`browser-evidence.json` 和 `ingestion-evidence.json`；失败时只保留 `final-report.md` 与 `debug-bundle.json`；只有用户明确要求调试时才传 `--keep-artifacts` 保留全部中间文件。不要把每次运行产生的契约、旅程、浏览器报告和每次查询结果作为用户可见交付物。
 
 ## 7. 结果输出
 
@@ -210,3 +208,5 @@ Version 3 浏览器报告至少包含逐步定位证据和可合并的事件结�
 | 平台入库 | `PASS` / `NOT_FOUND` / `COUNT_MISMATCH` / `DUPLICATED` / `CONTRACT_MISMATCH` / `QUERY_FAILED` | 按环境、事件和触发时间查询候选，本地应用稳定 match，再与契约字段和次数比较 |
 
 只有浏览器旅程达到预期且平台入库契约通过时，`browser-verify` 才能返回最终 `PASS`。控制台日志未提供时可标记 `NOT_AVAILABLE`，但不能因此跳过平台查询。
+
+成功后将会话内 `browser-evidence.json`、`ingestion-evidence.json` 分别作为汇总器的 `--browser`、`--ingestion` 输入。最终汇总报告写入并确认可读取后，再执行 `node scripts/run-browser-ingestion-verification.mjs --cleanup --session <会话目录>`；汇总失败时保留证据以便恢复。无需 `--keep-artifacts` 即可完成正常闭环。

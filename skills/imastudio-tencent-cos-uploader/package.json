@@ -1,0 +1,18 @@
+{
+  "name": "imastudio-tencent-cos-uploader",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check scripts/upload-to-tencent-cos.mjs",
+    "help": "node scripts/upload-to-tencent-cos.mjs --help",
+    "test": "node --test test/upload-to-tencent-cos.test.mjs",
+    "verify": "pnpm run check && pnpm run test && pnpm run help"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "cos-nodejs-sdk-v5": "^3.0.0"
+  }
+}

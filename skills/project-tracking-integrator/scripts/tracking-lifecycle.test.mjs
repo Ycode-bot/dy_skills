@@ -32,7 +32,7 @@ test('scanProject classifies a reachable Sensors architecture as established', (
             { path: 'package.json', text: JSON.stringify({ dependencies: { 'sensors-data-sdk': '1.0.0' } }) },
             { path: 'plugins/sensors.ts', text: 'KEWLSensors.init({ server_url: "/sa?project=test" })' },
             { path: 'lib/track/index.ts', text: 'export function track(name, data) { KEWLSensors.track(name, data) }' },
-            { path: 'lib/track/signup.ts', text: 'export function trackSignupClick() { track("signup_click", { button_name: "signup" }) }' },
+            { path: 'lib/track/signup.ts', text: 'import sensors from "@joyme/sensors-data"; export function trackSignupClick() { sensors.track("signup_click", { button_name: "signup" }) }' },
             { path: 'pages/signup.vue', text: 'function submit() { trackSignupClick() }' },
         ],
     });
@@ -55,30 +55,30 @@ test('scanProject does not mistake an installed SDK for an established system', 
 
 test('verifySource requires the declared wrapper to have a call site', () => {
     const passing = verifySource(contract, [
-        { path: 'lib/track/signup.ts', text: 'export function trackSignupClick() { track("signup_click", { button_name: "signup" }) }' },
-        { path: 'pages/signup.vue', text: 'trackSignupClick()' },
-    ], '/fixture');
+        { path: 'lib/track/signup.ts', text: 'import sensors from "@joyme/sensors-data"; export function trackSignupClick() { sensors.track("signup_click", { button_name: "signup" }) }' },
+        { path: 'pages/signup.vue', text: '<script setup>import { trackSignupClick } from \"../lib/track/signup\"; trackSignupClick()</script>' },
+    ], process.cwd());
     assert.equal(passing.results[0].status, 'PASS');
 
     const unreachable = verifySource(contract, [
-        { path: 'lib/track/signup.ts', text: 'export function trackSignupClick() { track("signup_click", { button_name: "signup" }) }' },
-    ], '/fixture');
+        { path: 'lib/track/signup.ts', text: 'import sensors from "@joyme/sensors-data"; export function trackSignupClick() { sensors.track("signup_click", { button_name: "signup" }) }' },
+    ], process.cwd());
     assert.equal(unreachable.results[0].status, 'UNREACHABLE');
 });
 
-test('verifySource reports missing required enum evidence', () => {
+test('verifySource rejects an actual value outside the allowed enum', () => {
     const enumContract = structuredClone(contract);
     enumContract.events[0].targets.sensors.properties.scene = {
         required: true,
         type: 'string',
-        oneOf: ['home', 'editor'],
+        oneOf: ['editor'],
     };
     const report = verifySource(enumContract, [
-        { path: 'lib/track/signup.ts', text: 'export function trackSignupClick() { track("signup_click", { button_name: "signup", scene: "home" }) }' },
-        { path: 'pages/signup.vue', text: 'trackSignupClick()' },
-    ], '/fixture');
+        { path: 'lib/track/signup.ts', text: 'import sensors from "@joyme/sensors-data"; export function trackSignupClick() { sensors.track("signup_click", { button_name: "signup", scene: "home" }) }' },
+        { path: 'pages/signup.vue', text: '<script setup>import { trackSignupClick } from \"../lib/track/signup\"; trackSignupClick()</script>' },
+    ], process.cwd());
     assert.equal(report.results[0].status, 'CONTRACT_MISMATCH');
-    assert.match(report.results[0].issues[0].message, /editor/);
+    assert.match(report.results[0].issues[0].message, /scene/);
 });
 
 test('buildReport only passes after source, runtime, and ingestion evidence pass', () => {

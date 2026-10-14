@@ -1,4 +1,6 @@
 import fs from 'node:fs/promises';
+import { analyzeTarget } from './source-analysis.mjs';
+import { isEntrypoint, translateDiagnostic, withChineseLabels, humanizeReport, formatIssue, issueDetails } from './reporting.mjs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -6,12 +8,12 @@ const SOURCE_EXTENSIONS = new Set(['.cjs', '.js', '.jsx', '.mjs', '.svelte', '.t
 const IGNORED = new Set(['.git', '.next', '.nuxt', '.output', 'build', 'coverage', 'dist', 'node_modules', 'public', 'vendor']);
 const MAX_BYTES = 1024 * 1024;
 
-const HELP = `Tracking source verifier
+const HELP = `埋点源码检查
 
-Usage:
+用法:
   node scripts/verify-tracking-source.mjs --spec <contract.json> [--root <project>] [--format markdown|json] [--out <path>]
 
-This is a deterministic static check. A PASS still requires runtime and ingestion evidence.
+--scope method 仅检查方法；integration（默认）同时检查实际调用。静态通过不代表运行时或入库通过。
 `;
 
 function usage(message) {
@@ -21,18 +23,20 @@ function usage(message) {
 }
 
 function parseArgs(argv) {
-    const options = { spec: '', root: process.cwd(), format: 'markdown', out: '', help: false };
+    const options = { spec: '', root: process.cwd(), format: 'markdown', out: '', scope: 'integration', help: false };
     for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
         if (arg === '--help') options.help = true;
         else if (arg === '--spec') options.spec = argv[++index];
         else if (arg === '--root') options.root = argv[++index];
+        else if (arg === '--scope') options.scope = argv[++index];
         else if (arg === '--format') options.format = argv[++index];
         else if (arg === '--out') options.out = argv[++index];
-        else usage(`unknown argument: ${arg}`);
+        else usage(`未知参数: ${arg}`);
     }
-    if (!options.help && !options.spec) usage('--spec is required');
-    if (!['markdown', 'json'].includes(options.format)) usage('--format must be markdown or json');
+    if (!options.help && !options.spec) usage('必须提供 --spec');
+    if (!['method', 'integration'].includes(options.scope)) usage('--scope 仅支持 method 或 integration');
+    if (!['markdown', 'json'].includes(options.format)) usage('--format 仅支持 markdown 或 json');
     return options;
 }
 
@@ -71,6 +75,10 @@ async function collectSources(root) {
         }
     }
     await visit(absoluteRoot);
+    for (const generated of ['.nuxt/imports.d.ts', '.nuxt/imports.mjs']) {
+        try { sources.push({ path: generated, text: await fs.readFile(path.join(absoluteRoot, generated), 'utf8') }); }
+        catch { /* Generated imports are optional; unresolved calls need review. */ }
+    }
     return sources;
 }
 
@@ -81,7 +89,11 @@ function normalizeTargets(contract) {
         if (event.targets) {
             for (const [platform, target] of Object.entries(event.targets)) {
                 const status = target.status || (target.required === false ? 'optional' : 'required');
-                if (!['required', 'optional'].includes(status)) continue;
+                if (status === 'disabled') continue;
+                if (status === 'unknown') {
+                    results.push({ id: event.id || `event-${index + 1}`, platform, targetStatus: status, event: target.event || '' });
+                    continue;
+                }
                 if (!target.event) {
                     if (status === 'required') usage(`contract.events[${index}].targets.${platform}.event is required`);
                     continue;
@@ -117,88 +129,18 @@ function normalizeTargets(contract) {
     return results;
 }
 
-function filesContaining(sources, value) {
-    if (value === undefined || value === null || value === '') return [];
-    const needle = String(value);
-    return sources.filter(source => source.text.includes(needle)).map(source => source.path);
+function verifyTarget(expected, sources, root = '', options = {}) {
+    if (expected.targetStatus === 'unknown') return { ...expected, status: 'BLOCKED', checks: [], issues: [issueDetails({ message: '目标平台的埋点需求尚未确定，未执行源码验收', location: `契约 ${expected.id}/${expected.platform}`, nextStep: '明确目标为必需、可选或停用后重新检查' })] };
+    return analyzeTarget(expected, sources, root, options);
 }
 
-function wordOccurrenceCount(sources, word) {
-    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const expression = new RegExp(`\\b${escaped}\\b`, 'g');
-    return sources.reduce((total, source) => total + [...source.text.matchAll(expression)].length, 0);
-}
-
-function verifyTarget(expected, sources) {
-    const checks = [];
-    const eventFiles = filesContaining(sources, expected.event);
-    checks.push({ kind: 'event', name: expected.event, found: eventFiles.length > 0, files: eventFiles.slice(0, 8) });
-
-    for (const [name, value] of Object.entries(expected.match)) {
-        const nameFiles = filesContaining(sources, name);
-        const valueFiles = filesContaining(sources, value);
-        checks.push({
-            kind: 'match', name, found: nameFiles.length > 0 && valueFiles.length > 0,
-            files: [...new Set([...nameFiles, ...valueFiles])].slice(0, 8),
-        });
-    }
-    for (const [name, rule] of Object.entries(expected.properties)) {
-        if (rule.required === false) continue;
-        const nameFiles = filesContaining(sources, name);
-        const expectedValues = Object.prototype.hasOwnProperty.call(rule, 'equals')
-            ? [rule.equals]
-            : Array.isArray(rule.oneOf) ? rule.oneOf : [];
-        const missingValues = expectedValues.filter(value => filesContaining(sources, value).length === 0);
-        const valueFiles = expectedValues.flatMap(value => filesContaining(sources, value));
-        checks.push({
-            kind: 'property',
-            name,
-            found: nameFiles.length > 0 && missingValues.length === 0,
-            missingValues,
-            files: [...new Set([...nameFiles, ...valueFiles])].slice(0, 8),
-        });
-    }
-
-    let wrapperOccurrences = 0;
-    if (expected.wrapper) {
-        const files = filesContaining(sources, expected.wrapper);
-        wrapperOccurrences = wordOccurrenceCount(sources, expected.wrapper);
-        checks.push({ kind: 'wrapper', name: expected.wrapper, found: wrapperOccurrences > 0, occurrences: wrapperOccurrences, files: files.slice(0, 8) });
-    }
-
-    const missingEventOrWrapper = checks.some(check => ['event', 'wrapper'].includes(check.kind) && !check.found);
-    const missingContractFields = checks.some(check => ['match', 'property'].includes(check.kind) && !check.found);
-    let status = 'PASS';
-    const issues = [];
-    if (missingEventOrWrapper) {
-        status = 'MISSING_IMPLEMENTATION';
-        for (const check of checks.filter(item => ['event', 'wrapper'].includes(item.kind) && !item.found)) {
-            issues.push({ code: 'MISSING_IMPLEMENTATION', message: `源码中未找到 ${check.kind}：${check.name}` });
-        }
-    }
-    else if (expected.wrapper && wrapperOccurrences < 2) {
-        status = 'UNREACHABLE';
-        issues.push({ code: 'WRAPPER_NOT_CALLED', message: `只找到 ${expected.wrapper} 的定义或单次引用，未找到可信调用点` });
-    }
-    else if (missingContractFields) {
-        status = 'CONTRACT_MISMATCH';
-        for (const check of checks.filter(item => ['match', 'property'].includes(item.kind) && !item.found)) {
-            const values = check.missingValues?.length ? `，缺少约定值 ${check.missingValues.join('、')}` : '';
-            issues.push({ code: 'MISSING_CONTRACT_FIELD', message: `源码中未找到完整的 ${check.kind}：${check.name}${values}` });
-        }
-    }
-    else if (!expected.wrapper) {
-        status = 'NEEDS_REVIEW';
-        issues.push({ code: 'WRAPPER_UNDECLARED', message: '契约未声明业务 wrapper，静态检查无法证明调用路径可达' });
-    }
-
-    return { ...expected, status, checks, issues };
-}
-
-function verifySource(contract, sources, root = '') {
-    const results = normalizeTargets(contract).map(expected => verifyTarget(expected, sources));
+function verifySource(contract, sources, root = '', options = {}) {
+    const results = normalizeTargets(contract).map(expected => verifyTarget(expected, sources, root, options));
     return {
         schemaVersion: 1,
+        status: !results.length || results.some(result => result.status === 'BLOCKED') ? 'BLOCKED'
+            : results.every(result => result.status === 'PASS') ? 'PASS' : 'FAILED',
+        issues: results.length ? [] : [issueDetails({ message: '本次没有可检查的目标，源码验收未执行', nextStep: '明确本次事件和平台后重新检查' })],
         generatedAt: new Date().toISOString(),
         root,
         summary: {
@@ -208,7 +150,7 @@ function verifySource(contract, sources, root = '') {
         },
         results,
         limitations: [
-            '该检查基于源码字面量和 wrapper 引用，不执行控制流分析。',
+            '检查关联方法体、传输参数和实际调用；不证明运行时控制流与业务语义。',
             'PASS 只代表静态证据一致，仍需浏览器发送和数据平台入库证据。',
         ],
     };
@@ -221,13 +163,14 @@ function formatMarkdown(report) {
         `- 结果：${report.summary.passed}/${report.summary.total} 通过`, '',
         '| 契约 | 平台 | 事件 | 状态 |', '|---|---|---|---|',
     ];
+    for (const issue of report.issues || []) lines.push(`- ${formatIssue(issue)}`);
     for (const result of report.results) lines.push(`| ${result.id} | ${result.platform} | ${result.event} | ${result.status} |`);
     for (const result of report.results.filter(item => item.issues.length > 0)) {
         lines.push('', `## ${result.id}/${result.platform}`, '');
-        for (const issue of result.issues) lines.push(`- ${issue.message}`);
+        for (const issue of result.issues) lines.push(`- ${formatIssue(issue)}`);
     }
     lines.push('', '## 限制', '', ...report.limitations.map(item => `- ${item}`), '');
-    return lines.join('\n');
+    return humanizeReport(lines.join('\n'));
 }
 
 async function run(argv = process.argv.slice(2)) {
@@ -238,20 +181,20 @@ async function run(argv = process.argv.slice(2)) {
     }
     const contract = JSON.parse(await fs.readFile(path.resolve(options.spec), 'utf8'));
     const root = path.resolve(options.root);
-    const report = verifySource(contract, await collectSources(root), root);
+    const report = withChineseLabels(verifySource(contract, await collectSources(root), root, { scope: options.scope }));
     const output = options.format === 'json' ? `${JSON.stringify(report, null, 2)}\n` : formatMarkdown(report);
     if (options.out) {
         await fs.mkdir(path.dirname(path.resolve(options.out)), { recursive: true });
         await fs.writeFile(options.out, output, 'utf8');
     }
     else process.stdout.write(output);
-    return report.summary.failed === 0 ? 0 : 1;
+    return report.status === 'PASS' ? 0 : 1;
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+const isMain = isEntrypoint(import.meta.url);
 if (isMain) {
     run().then(code => { process.exitCode = code; }).catch(error => {
-        process.stderr.write(`Error: ${error.message}\n`);
+        process.stderr.write(`错误：${translateDiagnostic(error.message)}\n`);
         process.exitCode = error.isUsageError ? 2 : 3;
     });
 }

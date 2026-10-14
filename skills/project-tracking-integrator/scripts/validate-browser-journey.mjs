@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { isEntrypoint, formatValidation, withChineseLabels, translateDiagnostic } from './reporting.mjs';
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -151,7 +152,7 @@ function isLocalHostname(hostname) {
         || hostname.endsWith('.local');
 }
 
-function validateEnvironment(environment, startUrl, issues) {
+function validateEnvironment(environment, startUrl, issues, contract) {
     if (!ENVIRONMENTS.has(environment)) {
         issues.push('environment must be local, qa, or production');
         return;
@@ -159,6 +160,13 @@ function validateEnvironment(environment, startUrl, issues) {
     if (!startUrl) return;
     if (environment === 'local' && !isLocalHostname(startUrl.hostname)) {
         issues.push('local journey must use localhost, loopback IP, or a .local hostname');
+    }
+    const configured = contract?.environments?.[environment]?.startUrl;
+    if (configured && environment !== 'local') {
+        try {
+            if (new URL(configured).origin !== startUrl.origin) issues.push('浏览器起始地址与契约环境不一致');
+        } catch { issues.push('契约环境起始地址无效'); }
+        return;
     }
     if (environment === 'qa' && startUrl.hostname !== 'qa.imastudio.com') {
         issues.push('qa journey must use qa.imastudio.com');
@@ -269,7 +277,7 @@ export function validateBrowserJourney(journey, contract = null) {
         }
     }
     if ([2, 3].includes(journey.version)) {
-        validateEnvironment(journey.environment, startUrl, issues);
+        validateEnvironment(journey.environment, startUrl, issues, contract);
     }
     validateProductionSafety(journey, contract, startUrl, issues);
 
@@ -412,7 +420,7 @@ function parseArgs(argv) {
 function main() {
     const args = parseArgs(process.argv.slice(2));
     if (Boolean(args.journey) === Boolean(args.bundle)) {
-        console.error('Usage: validate-browser-journey.mjs (--journey <journey.json> | --bundle <verification-bundle.json>) [--out <report.json>]');
+        console.error('用法： validate-browser-journey.mjs (--journey <journey.json> | --bundle <verification-bundle.json>) [--out <report.json>]');
         process.exitCode = 2;
         return;
     }
@@ -433,10 +441,12 @@ function main() {
         }
     }
     const report = validateBrowserJourney(journey, contract);
-    const output = `${JSON.stringify(report, null, 2)}\n`;
+    const output = `${JSON.stringify(withChineseLabels(report), null, 2)}\n`;
     if (args.out) fs.writeFileSync(path.resolve(args.out), output);
-    else process.stdout.write(output);
+    else process.stdout.write(formatValidation(report));
     if (report.status !== 'PASS') process.exitCode = 1;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) main();
+if (isEntrypoint(import.meta.url)) {
+    try { main(); } catch (error) { console.error(`错误：${translateDiagnostic(error.message)}`); process.exitCode = 2; }
+}

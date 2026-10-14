@@ -331,8 +331,8 @@ test('an omitted maxCount accepts all candidates that satisfy the contract', () 
         }],
     });
     const report = compareContract(unboundedContract, [
-        { event: 'ImaWebStream', action_type: 'show' },
-        { event: 'ImaWebStream', action_type: 'show' },
+        { event: 'ImaWebStream', action_type: 'show', lmweb_url: 'http://localhost:3001/' },
+        { event: 'ImaWebStream', action_type: 'show', lmweb_url: 'http://localhost:3001/' },
     ]);
 
     assert.equal(report.results[0].status, 'PASS');
@@ -440,8 +440,8 @@ test('match separates business actions that share one Sensors event name', () =>
         ],
     });
     const report = compareContract(sharedEventContract, [
-        { event: 'ima_function_click', btn_name: 'dialog_show' },
-        { event: 'ima_function_click', btn_name: 'dialog_click' },
+        { event: 'ima_function_click', btn_name: 'dialog_show', lmweb_url: 'http://localhost:3000/' },
+        { event: 'ima_function_click', btn_name: 'dialog_click', lmweb_url: 'http://localhost:3000/' },
     ]);
     assert.equal(report.summary.passed, 2);
 });
@@ -568,7 +568,7 @@ test('dry-run prints the environment isolation condition', () => {
     }, {
         SENSORS_QUERY_API_SECRET: 'must-not-appear',
     });
-    assert.match(output, /Environment: custom; lmweb_url contains qa\.imastudio\.com/);
+    assert.match(output, /环境： 自定义; lmweb_url 候选包含并校验精确主机 qa\.imastudio\.com/);
     assert.match(output, /`lmweb_url` LIKE '%qa\.imastudio\.com%'/);
 });
 
@@ -614,7 +614,7 @@ test('local environment dry-run uses only contract query selectors', async () =>
         });
         assert.equal(code, 0);
         const output = await fs.readFile(out, 'utf8');
-        assert.match(output, /Environment: local; lmweb_url contains localhost:3000/);
+        assert.match(output, /环境： 本地; lmweb_url 候选包含并校验精确主机 localhost:3000/);
         assert.match(output, /`lmweb_url` LIKE '%localhost:3000%'/);
         assert.doesNotMatch(output, /distinct_id\s*=/);
         assert.doesNotMatch(output, /secret-not-printed/);
@@ -743,8 +743,8 @@ test('live query reuses one candidate request for contracts sharing an event', a
             assert.doesNotMatch(String(init.body), /btn_name/);
             return new Response(JSON.stringify({
                 events: [
-                    { event: 'ima_function_click', btn_name: 'dialog_show' },
-                    { event: 'ima_function_click', btn_name: 'dialog_click' },
+                    { event: 'ima_function_click', btn_name: 'dialog_show', lmweb_url: 'http://localhost:3000/' },
+                    { event: 'ima_function_click', btn_name: 'dialog_click', lmweb_url: 'http://localhost:3000/' },
                 ],
             }), { status: 200 });
         };
@@ -812,8 +812,8 @@ test('browser report freezes the trigger window across delayed queries', async (
             observedBodies.push(String(init.body));
             return new Response(JSON.stringify({
                 events: [
-                    { event: 'ImaWebStream', action_type: 'show' },
-                    { event: 'ImaWebStream', action_type: 'show' },
+                    { event: 'ImaWebStream', action_type: 'show', lmweb_url: 'http://localhost:3001/' },
+                    { event: 'ImaWebStream', action_type: 'show', lmweb_url: 'http://localhost:3001/' },
                 ],
             }), { status: 200 });
         };

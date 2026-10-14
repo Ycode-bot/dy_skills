@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'node:fs/promises';
+import { isEntrypoint, statusLabel, translateDiagnostic, humanizeReport, withChineseLabels } from './reporting.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -16,56 +17,25 @@ const DEFAULT_CREDENTIALS_FILE = path.join(os.homedir(), '.config', 'imastudio',
 const SENSITIVE_FIELD_PATTERN = /(token|secret|password|authorization|cookie|email|phone|mobile|account|userinfo|distinct[_-]?id)/i;
 const ENVIRONMENT_NAMES = new Set(['local', 'qa', 'production']);
 
-const HELP_TEXT = `Sensors Analytics event verifier
+const HELP_TEXT = `神策事件验收
 
-Compare a normalized tracking contract with captured events or query Sensors Analytics.
-Secrets are read only from environment variables or a private Profile JSON and are never accepted as CLI arguments.
-
-Usage:
+用法：
   node scripts/verify-sensors-events.mjs --spec <contract.json> --actual <events.json|ndjson>
-  node scripts/verify-sensors-events.mjs --spec <contract.json> --query [options]
+  node scripts/verify-sensors-events.mjs --spec <contract.json> --query [参数]
 
-Required:
-  --spec <path>                  Normalized tracking contract JSON
-  --actual <path>               Captured JSON/NDJSON events for offline verification
-  --query                       Query Sensors Analytics instead of reading --actual
+数据：--spec 契约；--actual 离线事件；--query 只读查询（与 --actual 二选一）。
+查询配置：--credentials 私有凭证文件；--profile 配置名；--base-url 服务地址；--project 项目；--query-path 查询路径。
+认证：--auth-mode 支持 token-query、openapi、bearer、header；--api-key-header 指定认证头名称。
+时间：--since-minutes 默认 30 分钟；--browser-report 使用固定触发窗口；或配套 --started-at / --finished-at。
+时区：--query-time-zone 为查询服务 IANA 时区，默认 Asia/Shanghai；也可配置 SENSORS_QUERY_TIME_ZONE 或凭证 query_time_zone。
+环境：--environment 支持 local、qa、production；--environment-value 为 host 或 host:port；--environment-host 是兼容别名。
+--environment-property 默认为 lmweb_url，候选返回后按精确 URL.host 校验；不能使用任意包含关系替代环境隔离。
+限制：--limit 默认 100、最大 10000；--timeout-ms 默认 30000；--dry-run 仅展示脱敏查询预览。
+输出：--format markdown|json，默认中文 Markdown；--out 保存到文件；--help 显示帮助。
 
-Query options:
-  --credentials <path>          Profile JSON; env SENSORS_QUERY_CREDENTIALS_FILE
-  --profile <name>              Profile name; defaults to file's default_profile
-  --base-url <url>              Query service base URL; env SENSORS_QUERY_BASE_URL
-  --project <name>              Sensors project; env SENSORS_QUERY_PROJECT
-  --query-path <path>           Override profile path; default: /api/sql/query
-  --auth-mode <mode>            token-query, openapi, bearer, or header
-  --api-key-header <name>       Header mode only; default: X-API-Key
-  --since-minutes <n>           Query window; default: contract value or 30
-  --browser-report <path>       Use triggerWindow/environment from a browser report
-  --started-at <ISO-8601>       Fixed query lower bound; preferred after a browser trigger
-  --finished-at <ISO-8601>      Fixed query upper bound; requires --started-at
-  --environment <name>          local, qa, or production
-  --environment-value <value>   URL host substring without protocol/path; e.g. localhost:3000
-  --environment-host <host>     Compatibility alias for --environment-value
-  --environment-property <key>  Property used for environment; contract or lmweb_url
-  --limit <n>                   Per-query row limit; default 100, maximum 10000
-  --timeout-ms <n>              Request timeout; default 30000
-  --dry-run                     Print redacted endpoint and SQL without querying
-
-Output options:
-  --format <markdown|json>       Default: markdown
-  --out <path>                  Write report to a file instead of stdout
-  --help                        Show this help
-
-Credential environment variables:
-  profile file: SENSORS_QUERY_CREDENTIALS_FILE (fallback: ~/.config/imastudio/sensors-credentials.json)
-  token-query: SENSORS_QUERY_API_SECRET (fallback SENSORS_QUERY_TOKEN or SENSORS_API_KEY)
-  bearer/header: SENSORS_QUERY_API_KEY (fallback SENSORS_API_KEY)
-
-Compatibility environment variables:
-  SENSORS_API_BASE_URL and SENSORS_PROJECT are accepted as fallbacks.
-
-Credential profile shape:
-  {"default_profile":"prod","profiles":{"prod":{"hosts":["https://host"],"project":"name","api_key":"..."}}}
-  A 35-character #K- API Key automatically selects openapi mode.
+凭证读取：SENSORS_QUERY_CREDENTIALS_FILE 或已有 ~/.config/imastudio/sensors-credentials.json。
+服务可用 SENSORS_QUERY_BASE_URL / SENSORS_QUERY_PROJECT 配置（兼容 SENSORS_API_BASE_URL / SENSORS_PROJECT）。
+密钥仅从私有配置或 SENSORS_QUERY_API_SECRET、SENSORS_QUERY_TOKEN、SENSORS_QUERY_API_KEY、SENSORS_API_KEY 读取，不接受命令参数中的密钥。
 `;
 
 function fail(message) {
@@ -87,6 +57,7 @@ function parseArgs(argv) {
         authMode: '',
         apiKeyHeader: '',
         sinceMinutes: undefined,
+        queryTimeZone: '',
         browserReport: '',
         startedAt: '',
         finishedAt: '',
@@ -113,6 +84,7 @@ function parseArgs(argv) {
         '--auth-mode',
         '--api-key-header',
         '--since-minutes',
+        '--query-time-zone',
         '--browser-report',
         '--started-at',
         '--finished-at',
@@ -150,6 +122,7 @@ function parseArgs(argv) {
         index += 1;
         const keyMap = {
             '--spec': 'spec',
+            '--query-time-zone': 'queryTimeZone',
             '--actual': 'actual',
             '--credentials': 'credentials',
             '--profile': 'profile',
@@ -238,6 +211,7 @@ function validateOptions(options) {
 
 function parseIsoDate(value, optionName) {
     if (!value) return null;
+    if (typeof value !== 'string' || !/(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) fail(`${optionName} 必须包含 Z 或明确时区偏移`);
     const date = new Date(value);
     if (!Number.isFinite(date.getTime()) || !/^\d{4}-\d{2}-\d{2}T/.test(value)) {
         fail(`${optionName} must be a valid ISO-8601 timestamp`);
@@ -423,6 +397,7 @@ function normalizeCredentialDocument(raw, requestedProfile = '') {
         apiKey: profile.api_key || '',
         authMode,
         apiKeyHeader: profile.api_key_header || 'X-API-Key',
+        queryTimeZone: profile.query_time_zone || '',
         queryPath: profile.query_path || '',
     };
 }
@@ -765,7 +740,7 @@ function compareExpected(expected, rows, query = null) {
             message: `神策查询达到 ${query.limit} 条上限，无法安全判断目标事件是否缺失、重复或全部符合契约；请缩短时间窗或提高 --limit`,
         });
     }
-    else if (candidates.length === 0) {
+    else if (candidates.length === 0 && expected.minCount > 0) {
         status = 'NOT_FOUND';
         issues.push({
             code: rows.length > 0 ? 'MATCH_NOT_FOUND' : 'NOT_FOUND',
@@ -801,7 +776,7 @@ function compareExpected(expected, rows, query = null) {
         event: expected.event,
         trigger: expected.trigger,
         status,
-        queriedRowCount: rows.length,
+        queriedRowCount: query?.queriedRowCount ?? rows.length,
         candidateCount: candidates.length,
         passingCount,
         expectedCount: { min: expected.minCount, max: expected.maxCount },
@@ -839,19 +814,37 @@ function escapeSqlLiteral(value) {
     return String(value).replaceAll("'", "''");
 }
 
-function formatLocalDate(date) {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+function queryDateParts(date, timeZone = 'Asia/Shanghai') {
+    try {
+        return Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+            timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+        }).formatToParts(date).map(item => [item.type, item.value]));
+    } catch { fail('查询时区无效，请使用 IANA 时区名称，例如 Asia/Shanghai'); }
+}
+function formatLocalDate(date, timeZone) {
+    const p = queryDateParts(date, timeZone);
+    return `${p.year}-${p.month}-${p.day}`;
+}
+function formatLocalDateTime(date, timeZone) {
+    const p = queryDateParts(date, timeZone);
+    return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}.${String(date.getUTCMilliseconds()).padStart(3, '0')}`;
 }
 
-function formatLocalDateTime(date) {
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    const seconds = String(date.getSeconds()).padStart(2, '0');
-    const milliseconds = String(date.getMilliseconds()).padStart(3, '0');
-    return `${formatLocalDate(date)} ${hours}:${minutes}:${seconds}.${milliseconds}`;
+function filterEnvironmentRows(rows, options) {
+    const value = options.environmentValue || options.environmentHost;
+    if (!value) return { rows, invalidEnvironmentCount: 0 };
+    const property = options.environmentProperty || 'lmweb_url';
+    const expectedHost = new URL(`http://${value}`).host;
+    let invalidEnvironmentCount = 0;
+    const filtered = rows.filter(row => {
+        const actual = getProperty(row, property);
+        try {
+            if (typeof actual !== 'string' || !/^https?:\/\//i.test(actual)) throw new Error('url');
+            return new URL(actual).host === expectedHost;
+        } catch { invalidEnvironmentCount += 1; return false; }
+    });
+    return { rows: filtered, invalidEnvironmentCount };
 }
 
 function quoteSqlIdentifier(name) {
@@ -882,11 +875,11 @@ function buildSensorsSql(expected, options = {}) {
     const { from, to } = resolveQueryWindow(expected, options);
     const partitionCondition = options.authMode === 'openapi'
         ? `day BETWEEN ${Math.floor(from.getTime() / 86400000) - 1} AND ${Math.floor(to.getTime() / 86400000) + 1}`
-        : `date BETWEEN '${formatLocalDate(from)}' AND '${formatLocalDate(to)}'`;
+        : `date BETWEEN '${formatLocalDate(from, options.queryTimeZone)}' AND '${formatLocalDate(to, options.queryTimeZone)}'`;
     const conditions = [
         partitionCondition,
-        `time >= '${formatLocalDateTime(from)}'`,
-        `time <= '${formatLocalDateTime(to)}'`,
+        `time >= '${formatLocalDateTime(from, options.queryTimeZone)}'`,
+        `time <= '${formatLocalDateTime(to, options.queryTimeZone)}'`,
         `event = '${escapeSqlLiteral(expected.event)}'`,
     ];
     const environmentValue = options.environmentValue || options.environmentHost;
@@ -1076,8 +1069,11 @@ async function queryAllEvents(contract, options, env = process.env) {
         if (!cache.has(cacheKey)) {
             try {
                 const rows = await querySensorsEvent(expected, eventOptions, env);
+                const isolated = filterEnvironmentRows(rows, options);
                 cache.set(cacheKey, {
-                    rows,
+                    ...isolated,
+                    queriedRowCount: rows.length,
+                    ...(isolated.invalidEnvironmentCount ? { error: '候选事件的环境 URL 缺失或无法解析，不能确认环境隔离；请检查公共 URL 字段' } : {}),
                     truncated: rows.length >= options.limit,
                     limit: options.limit,
                     queryWindow,
@@ -1107,8 +1103,8 @@ function formatMarkdown(report, sourceLabel) {
         `- 结果：${report.summary.passed}/${report.summary.total} 通过`,
     ];
     if (report.environment) {
-        lines.push(`- 验证环境：\`${report.environment.name}\``);
-        lines.push(`- 环境过滤：\`${report.environment.property}\` 包含 \`${report.environment.value}\``);
+        lines.push(`- 验证环境：\`${statusLabel(report.environment.name)}\``);
+        lines.push(`- 环境过滤：\`${report.environment.property}\` 精确主机匹配 \`${report.environment.value}\``);
     }
     lines.push(
         '',
@@ -1118,7 +1114,7 @@ function formatMarkdown(report, sourceLabel) {
     for (const result of report.results) {
         lines.push(`| ${result.id} | ${result.event} | ${result.status} | ${result.queriedRowCount} | ${result.candidateCount} | ${result.passingCount} |`);
         if (result.queryWindow) {
-            lines.push(`|  | 查询窗口 | ${result.queryWindow.mode} | ${result.queryWindow.startedAt} | ${result.queryWindow.finishedAt} |  |`);
+            lines.push(`|  | 查询窗口 | ${result.queryWindow.mode === 'fixed-browser-trigger' ? '固定触发窗口' : '相对时间窗口'} | ${result.queryWindow.startedAt} | ${result.queryWindow.finishedAt} |  |`);
         }
     }
     for (const result of report.results.filter(item => item.issues.length > 0)) {
@@ -1131,24 +1127,24 @@ function formatMarkdown(report, sourceLabel) {
         }
     }
     lines.push('');
-    return lines.join('\n');
+    return humanizeReport(lines.join('\n'));
 }
 
 function formatDryRun(contract, options, env = process.env) {
     const config = resolveQueryConfig({ ...options, dryRun: true }, env);
-    const lines = config.baseUrls.map(baseUrl => `Endpoint: ${makeEndpoint(config, baseUrl, true).toString()}`);
-    lines.push(`Profile: ${options.credentialProfile?.name || 'environment/CLI'}`, `Auth mode: ${config.authMode}`);
+    const lines = config.baseUrls.map(baseUrl => `查询地址： ${makeEndpoint(config, baseUrl, true).toString()}`);
+    lines.push(`凭证配置： ${options.credentialProfile?.name || 'environment/CLI'}`, `认证方式： ${config.authMode}`);
     const environmentValue = options.environmentValue || options.environmentHost;
     if (environmentValue) {
-        lines.push(`Environment: ${options.environment || 'custom'}; ${options.environmentProperty || 'lmweb_url'} contains ${environmentValue}`);
+        lines.push(`环境： ${options.environment ? statusLabel(options.environment) : '自定义'}; ${options.environmentProperty || 'lmweb_url'} 候选包含并校验精确主机 ${environmentValue}`);
     }
     lines.push('');
     for (const expected of contract.events) {
         const window = resolveQueryWindow(expected, options);
-        lines.push(`Query window: ${window.mode}; ${window.from.toISOString()} -> ${window.to.toISOString()}`);
+        lines.push(`查询窗口： ${window.mode === 'fixed-browser-trigger' ? '固定触发窗口' : '相对时间窗口'}; ${window.from.toISOString()} -> ${window.to.toISOString()}`);
         lines.push(`[${expected.id}]`, buildSensorsSql(expected, { ...options, authMode: config.authMode }), '');
     }
-    return lines.join('\n');
+    return humanizeReport(lines.join('\n'));
 }
 
 async function run(argv = process.argv.slice(2), env = process.env) {
@@ -1177,6 +1173,8 @@ async function run(argv = process.argv.slice(2), env = process.env) {
         };
     }
 
+    options.queryTimeZone = options.queryTimeZone || env.SENSORS_QUERY_TIME_ZONE || options.credentialProfile?.queryTimeZone || 'Asia/Shanghai';
+    queryDateParts(new Date(), options.queryTimeZone);
     const contract = normalizeContract(rawContract, options.environment);
     if (options.query && options.dryRun) {
         const output = formatDryRun(contract, options, env);
@@ -1199,10 +1197,12 @@ async function run(argv = process.argv.slice(2), env = process.env) {
             name: options.environment || 'custom',
             property: options.environmentProperty || 'lmweb_url',
             value: environmentValue,
+            comparison: 'exact-url-host',
+            queryTimeZone: options.queryTimeZone,
         };
     }
     const output = options.format === 'json'
-        ? `${JSON.stringify(report, null, 2)}\n`
+        ? `${JSON.stringify(withChineseLabels(report), null, 2)}\n`
         : formatMarkdown(report, options.actual ? `离线事件文件 ${options.actual}` : '神策查询 API');
 
     if (options.out) {
@@ -1215,18 +1215,19 @@ async function run(argv = process.argv.slice(2), env = process.env) {
     return report.summary.failed === 0 ? 0 : 1;
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+const isMain = isEntrypoint(import.meta.url);
 if (isMain) {
     run().then(code => {
         process.exitCode = code;
     }).catch(error => {
-        process.stderr.write(`Error: ${error.message}\n`);
+        process.stderr.write(`错误：${translateDiagnostic(error.message)}\n`);
         process.exitCode = error.isUsageError ? 2 : 3;
     });
 }
 
 export {
     buildSensorsSql,
+    filterEnvironmentRows,
     compareContract,
     compareQueriedContract,
     formatDryRun,

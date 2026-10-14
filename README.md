@@ -20,6 +20,7 @@ npx skills add Ycode-bot/dy_skills@workplace-viral-copywriter -y -g
 npx skills add Ycode-bot/dy_skills@tinify-image-compressor -y -g
 npx skills add Ycode-bot/dy_skills@cloudflare-auto-deployer -y -g
 npx skills add Ycode-bot/dy_skills@project-tracking-integrator -y -g
+npx skills add Ycode-bot/dy_skills@imastudio-tencent-cos-uploader -y -g
 ```
 
 Install all at once:
@@ -30,7 +31,8 @@ npx skills add Ycode-bot/dy_skills@activity-cms-psd -y -g && \
 npx skills add Ycode-bot/dy_skills@workplace-viral-copywriter -y -g && \
 npx skills add Ycode-bot/dy_skills@tinify-image-compressor -y -g && \
 npx skills add Ycode-bot/dy_skills@cloudflare-auto-deployer -y -g && \
-npx skills add Ycode-bot/dy_skills@project-tracking-integrator -y -g
+npx skills add Ycode-bot/dy_skills@project-tracking-integrator -y -g && \
+npx skills add Ycode-bot/dy_skills@imastudio-tencent-cos-uploader -y -g
 ```
 
 Verify installation:
@@ -47,6 +49,7 @@ ls ~/.agents/skills
 - `tinify-image-compressor`: Compresses, resizes, converts, and metadata-preserves local image batches with Tinify's Node.js API while keeping originals untouched by default.
 - `cloudflare-auto-deployer`: Detects whether a repo targets Cloudflare Pages or Workers, verifies credentials, prints safe Wrangler deployment plans, and can generate GitHub Actions workflows.
 - `project-tracking-integrator`: Discovers or establishes a multi-platform tracking system, implements data-team event contracts, and verifies source, runtime payloads, and platform ingestion.
+- `imastudio-tencent-cos-uploader`: Batch uploads local image, video, and audio files through ImaStudio's Tencent COS STS flow and writes a JSON file-to-URL manifest.
 
 ## Skill Dependencies
 
@@ -126,6 +129,20 @@ node scripts/cloudflare-deploy.mjs deploy /path/to/project
 node scripts/cloudflare-deploy.mjs github-action /path/to/project
 node scripts/cloudflare-deploy.mjs bootstrap-pages /path/to/frontend --apply
 ```
+
+`imastudio-tencent-cos-uploader` includes a Node.js helper for recursive media batch uploads. Install its dependencies once, keep the STS query parameter JSON outside Git, select the target environment explicitly, and use `--dry-run` before large batches:
+
+```bash
+cd skills/imastudio-tencent-cos-uploader
+pnpm install
+node scripts/upload-to-tencent-cos.mjs ./media --env test --dry-run
+node scripts/upload-to-tencent-cos.mjs ./media \
+  --env test \
+  --params-file /secure/path/sts-query.json \
+  --out ./upload-result.json
+```
+
+The uploader supports images, videos, and audio only. Live runs create private Tencent COS objects and return HTTPS URLs in the JSON manifest.
 
 You can also install dependencies manually:
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { randomUUID } from 'node:crypto';
+import { isEntrypoint, translateDiagnostic, humanizeReport, withChineseLabels, formatIssue } from './reporting.mjs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -22,28 +23,19 @@ const RESULT_NAME = 'verification-result.json';
 const DEFAULT_WAIT_SECONDS = 240;
 const MAX_WAIT_SECONDS = 1800;
 
-const HELP_TEXT = `Browser ingestion verification runner
+const HELP_TEXT = `浏览器与神策入库验收
 
-Prepare one editable verification bundle:
+用法：
   node scripts/run-browser-ingestion-verification.mjs --prepare
-
-Run a prepared session or a standalone bundle:
-  node scripts/run-browser-ingestion-verification.mjs --session <session-directory>
+  node scripts/run-browser-ingestion-verification.mjs --session <会话目录>
   node scripts/run-browser-ingestion-verification.mjs --bundle <verification-bundle.json>
 
-Run explicit inputs:
-  node scripts/run-browser-ingestion-verification.mjs \
-    --journey <journey.json> \
-    --spec <contract.json> \
-    --browser-report <browser-report.json>
-
-Options:
-  --keep-artifacts            Preserve all marker-owned session files after completion
-  --credentials <path>        Forward a private Sensors credentials profile file
-  --profile <name>            Forward a Sensors credentials profile name
-  --limit <n>                 Forward the per-query row limit
-  --timeout-ms <n>            Forward the query timeout
-  --help                      Show this help
+先准备临时会话，填写契约、旅程及真实浏览器证据，再运行验收。
+可用 --journey、--spec、--browser-report 同时传入已有文件。
+--credentials / --profile 指定私有凭证配置；--limit 查询上限；--timeout-ms 查询超时。
+--keep-artifacts 仅在明确要求调试时保留所有产物；默认通过后暂留汇总证据，失败保留中文报告和调试包。
+--cleanup --session <目录> 在最终汇总报告写入成功后清理本次自有会话。
+--help 显示帮助。此 runner 不执行浏览器动作，不能代替登录和逐步证据采集。
 `;
 
 function usage(message) {
@@ -73,6 +65,7 @@ function parseArgs(argv) {
     };
     const flags = new Map([
         ['--prepare', 'prepare'],
+        ['--cleanup', 'cleanup'],
         ['--help', 'help'],
         ['--keep-artifacts', 'keepArtifacts'],
     ]);
@@ -154,6 +147,7 @@ function summarizeAttempt(attempt, queriedAt, delaySeconds, report) {
             candidateCount: result.candidateCount,
             passingCount: result.passingCount,
             queryWindow: result.queryWindow || null,
+            issues: result.issues || [],
         })),
         report,
     };
@@ -558,25 +552,29 @@ function createSingleQuery({ paths, queryOptions = {}, verifierRun = runSensorsV
 
 function formatFinalReportMarkdown(workflow) {
     const lines = [
-        '# Browser ingestion verification',
+        '# 浏览器与入库验收',
         '',
-        `- Status: ${workflow.status}`,
-        `- Final attempt: ${workflow.finalAttempt}`,
-        `- Initial wait: ${workflow.policy?.ingestionWaitSeconds ?? '-'} seconds`,
-        `- Retry wait: ${workflow.policy?.retryWaitSeconds ?? '-'} seconds`,
+        `- 结果： ${workflow.status}`,
+        `- 最后查询轮次： ${workflow.finalAttempt}`,
+        `- 首次等待： ${workflow.policy?.ingestionWaitSeconds ?? '-'} 秒`,
+        `- 重查等待： ${workflow.policy?.retryWaitSeconds ?? '-'} 秒`,
     ];
-    if (workflow.error) lines.push(`- Error: ${workflow.error}`);
+    if (workflow.error) lines.push(`- 原因： ${translateDiagnostic(workflow.error)}`);
     lines.push(
         '',
-        '| Attempt | Queried at | Delay | Results |',
+        '| 轮次 | 查询时间 | 等待 | 结果 |',
         '|---|---|---:|---|',
     );
     for (const attempt of workflow.attempts || []) {
         const statuses = attempt.results.map(result => `${result.id || result.event || 'event'}=${result.status}`).join(', ');
         lines.push(`| ${attempt.attempt} | ${attempt.queriedAt} | ${attempt.delaySeconds}s | ${statuses || '-'} |`);
     }
+    for (const issue of workflow.inputValidation?.issues || []) lines.push(`- ${formatIssue(typeof issue === 'string' ? { message: issue } : issue)}`);
+    for (const attempt of workflow.attempts || []) for (const result of attempt.results || []) {
+        for (const issue of result.issues || []) lines.push(`- ${result.id || result.event}：${formatIssue(issue)}`);
+    }
     lines.push('');
-    return `${lines.join('\n')}\n`;
+    return humanizeReport(`${lines.join('\n')}\n`);
 }
 
 async function collapseFailedSession(paths, debugBundle) {
@@ -603,20 +601,44 @@ async function collapseFailedSession(paths, debugBundle) {
     return true;
 }
 
+function browserEvidenceReport(bundle) {
+    const report = bundle.browserReport;
+    if (!report?.results?.some(result => result.status === 'NOT_AVAILABLE')) return report;
+    // Only validated page steps can supply the separate page result.
+    const validation = validateBrowserReport(report, bundle.journey, bundle.contract);
+    if (validation.status !== 'PASS') return report;
+    return { ...report, results: report.results.map(result => result.status === 'NOT_AVAILABLE'
+        ? { ...result, pageStatus: 'PASS' } : result) };
+}
+
 async function finalizeSession({ paths, bundle, workflow, keepArtifacts = false }) {
     let ownedPaths = await resolveOwnedSession(paths.session);
     if (!ownedPaths) return { cleaned: false, collapsed: false, session: paths.session };
     await writeJson(ownedPaths.result, workflow, ownedPaths.session);
     await writeFileAtomic(ownedPaths.finalReport, formatFinalReportMarkdown(workflow), ownedPaths.session);
+    let evidenceArtifacts = {};
+    if (workflow.status === 'PASS') {
+        const browserEvidence = path.join(ownedPaths.session, 'browser-evidence.json');
+        const ingestionEvidence = path.join(ownedPaths.session, 'ingestion-evidence.json');
+        await writeJson(browserEvidence, browserEvidenceReport(bundle), ownedPaths.session);
+        await writeJson(ingestionEvidence, workflow.finalReport, ownedPaths.session);
+        evidenceArtifacts = { browserEvidence, ingestionEvidence };
+    }
     if (keepArtifacts) {
         await writeJson(ownedPaths.debugBundle, { workflow, ...bundle }, ownedPaths.session);
-        return { cleaned: false, collapsed: false, session: ownedPaths.session };
+        return { cleaned: false, collapsed: false, session: ownedPaths.session, ...evidenceArtifacts };
     }
     if (workflow.status === 'PASS') {
         ownedPaths = await resolveOwnedSession(ownedPaths.session);
         if (!ownedPaths) return { cleaned: false, collapsed: false, session: paths.session };
-        await fs.rm(ownedPaths.session, { recursive: true, force: true });
-        return { cleaned: true, collapsed: false, session: ownedPaths.session };
+        const keep = new Set([SESSION_MARKER, FINAL_REPORT_NAME, 'browser-evidence.json', 'ingestion-evidence.json']);
+        for (const entry of await fs.readdir(ownedPaths.session)) {
+            if (!keep.has(entry)) {
+                if (!await resolveOwnedSession(ownedPaths.session)) usage('--session is not a marker-owned temporary session');
+                await fs.rm(path.join(ownedPaths.session, entry), { recursive: true, force: true });
+            }
+        }
+        return { cleaned: false, collapsed: true, session: ownedPaths.session, ...evidenceArtifacts };
     }
     const debugBundle = workflow.inputValidation?.status === 'PASS'
         ? { workflow, ...bundle }
@@ -694,30 +716,40 @@ async function runCli(argv = process.argv.slice(2), dependencies = {}) {
         process.stdout.write(HELP_TEXT);
         return 0;
     }
+    if (options.cleanup) {
+        if (!options.session || options.prepare || options.bundle || options.journey || options.spec || options.browserReport || options.keepArtifacts) usage('--cleanup 只能与 --session 一起使用');
+        const paths = await resolveOwnedSession(options.session);
+        if (!paths) usage('--session is not a marker-owned temporary session');
+        await fs.rm(paths.session, { recursive: true, force: true });
+        process.stdout.write('本次验收临时证据已清理\n');
+        return 0;
+    }
     if (options.prepare) {
         const prepared = await prepareSession({ temporaryRoot: dependencies.temporaryRoot, now: dependencies.now });
-        process.stdout.write(`${JSON.stringify({ session: prepared.session, bundle: prepared.bundle }, null, 2)}\n`);
+        process.stdout.write(`临时会话已准备\n会话目录：${prepared.session}\n验收文件：${prepared.bundle}\n`);
         return 0;
     }
     if (!options.session && !options.bundle && !options.journey && !options.spec && !options.browserReport) {
         usage('provide --session, --bundle, or explicit --journey/--spec/--browser-report');
     }
     const result = await executeSession(options, dependencies);
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    process.stdout.write(formatFinalReportMarkdown(result));
+    if (result.artifacts?.browserEvidence) process.stdout.write(`浏览器汇总证据：${result.artifacts.browserEvidence}\n平台汇总证据：${result.artifacts.ingestionEvidence}\n最终报告写入成功后，使用 --cleanup --session 清理本次会话。\n`);
     return result.status === 'PASS' ? 0 : 1;
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+const isMain = isEntrypoint(import.meta.url);
 if (isMain) {
     runCli().then(code => {
         process.exitCode = code;
     }).catch(error => {
-        process.stderr.write(`Error: ${error.message}\n`);
+        process.stderr.write(`错误：${translateDiagnostic(error.message)}\n`);
         process.exitCode = error.isUsageError ? 2 : 3;
     });
 }
 
 export {
+    browserEvidenceReport,
     BUNDLE_NAME,
     DEBUG_BUNDLE_NAME,
     FINAL_REPORT_NAME,

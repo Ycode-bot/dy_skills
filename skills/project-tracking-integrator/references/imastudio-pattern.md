@@ -75,9 +75,9 @@ The tracking map is a business-journey SSoT. When changing `lib/track/`:
 5. Cross-event overlap: update `protocols/bridging.md`.
 6. Keep any external event catalog synchronized when the repository links to one.
 
-Run the repository commands currently defined in `package.json`, including the tracking-map check in strict mode when available, plus targeted lint/type checks. Read the current scripts rather than assuming command names.
+Run the repository commands currently defined in `package.json`, including the baseline-based tracking-map check; use strict mode only after historical debt is cleared, plus targeted lint/type checks. Read the current scripts rather than assuming command names.
 
-For Google-targeted events, also verify the exact `dataLayer` payload or `gtag` call, guard against duplicate firing through GTM, and preserve GA-specific units such as major currency units and stable transaction identifiers. Do not infer that a Google event belongs in the Sensors tracking map unless repository rules explicitly require cross-platform documentation there.
+For Google-targeted events, first read `docs/tracking-map/protocols/ga4-event-lifecycle.md` and update `docs/tracking-map/contracts/ga4-events.json` before wrappers/callers. Follow its required catalog, GTM review, negative-path and validation rules. GTM editing is not publication; never publish or change Ads conversions without separate authorization. Also verify the exact `dataLayer` payload or `gtag` call, guard against duplicate firing through GTM, and preserve GA-specific units such as major currency units and stable transaction identifiers. Do not infer that a Google event belongs in the Sensors tracking map unless repository rules explicitly require cross-platform documentation there.
 
 ## Review checklist
 

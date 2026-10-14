@@ -106,6 +106,12 @@ Make the article readable:
 - Add one small twist every 1-2 groups.
 - Use repeated objects as continuity anchors, such as basket, receipt, phone, door, bed, wallet.
 
+Reuse scenes, not stories:
+- A familiar location may be used again. Supermarkets, restaurants, homes, subways, offices, convenience stores, and bedrooms are reusable story stages.
+- Deduplicate the story mechanism instead of the location. The starting intention, central conflict, escalation chain, concrete props, social relationship, and ending payoff must not merely repaint a recent post.
+- Do not reject a strong topic only because the account has used the same setting before. A supermarket discount trap, a missing shopping-list item, and choosing the wrong checkout line are different stories even though all happen in a supermarket.
+- When reviewing recent content, ask `这个故事怎么发展` rather than only `这个故事在哪里发生`.
+
 Story rhythm:
 1. `起因`: one tiny plan or promise.
 2. `误入`: the environment gives one tempting detail.
@@ -137,7 +143,7 @@ Avoid:
 For a full article with no supplied topic:
 1. Search lightly if current platform resonance matters; otherwise use the built-in story motif bank.
 2. Build 2-3 candidate story scenes.
-3. Choose one scene with the strongest story chain.
+3. Choose the candidate with the strongest story chain. Reused locations are allowed when the conflict and payoff are genuinely different from recent posts.
 4. Draft the 5-7 paired groups as one continuous mini-story.
 5. Check that every line is imageable and belongs to the same story.
 6. Add title options, visual keywords, cover lines, interaction questions, and 3 tags, with `#卡皮巴拉` always first.

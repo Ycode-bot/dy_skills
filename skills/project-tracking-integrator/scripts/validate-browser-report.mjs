@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { isEntrypoint, formatValidation, withChineseLabels, translateDiagnostic } from './reporting.mjs';
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -426,13 +427,13 @@ function main() {
         options = parseArgs(process.argv.slice(2));
     }
     catch (error) {
-        process.stderr.write(`Error: ${error.message}\n`);
+        process.stderr.write(`错误：${translateDiagnostic(error.message)}\n`);
         process.exitCode = 2;
         return;
     }
     const explicitMode = options.journey || options.report || options.spec;
     if (Boolean(options.bundle) === Boolean(explicitMode) || (!options.bundle && (!options.journey || !options.report))) {
-        process.stderr.write('Usage: validate-browser-report.mjs (--bundle <verification-bundle.json> | --journey <journey.json> --report <browser-report.json> [--spec <contract.json>]) [--out <validation.json>]\n');
+        process.stderr.write('用法： validate-browser-report.mjs (--bundle <verification-bundle.json> | --journey <journey.json> --report <browser-report.json> [--spec <contract.json>]) [--out <validation.json>]\n');
         process.exitCode = 2;
         return;
     }
@@ -448,15 +449,15 @@ function main() {
             ? JSON.parse(fs.readFileSync(path.resolve(options.spec), 'utf8'))
             : null);
         const validation = validateBrowserReport(report, journey, contract);
-        const output = `${JSON.stringify(validation, null, 2)}\n`;
+        const output = `${JSON.stringify(withChineseLabels(validation), null, 2)}\n`;
         if (options.out) fs.writeFileSync(path.resolve(options.out), output);
-        else process.stdout.write(output);
+        else process.stdout.write(formatValidation(validation));
         if (validation.status !== 'PASS') process.exitCode = 1;
     }
     catch (error) {
-        process.stderr.write(`Error: ${error.message}\n`);
+        process.stderr.write(`错误：${translateDiagnostic(error.message)}\n`);
         process.exitCode = 3;
     }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) main();
+if (isEntrypoint(import.meta.url)) main();

@@ -1,0 +1,4 @@
+interface:
+  display_name: "ImaStudio Tencent COS Uploader"
+  short_description: "批量上传本地媒体到 ImaStudio 腾讯 COS 并返回 URL"
+  default_prompt: "Use $imastudio-tencent-cos-uploader to upload these local media files to the explicitly selected ImaStudio environment and return the JSON URL manifest."
