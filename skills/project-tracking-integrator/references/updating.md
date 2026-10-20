@@ -1,5 +1,7 @@
 # 按需更新
 
+本文适用于从发布源下载或检查安装版本。用户要求修改本 skill 的规则、代码或修复已知问题时，直接编辑用户指定的源码目录并验证，不运行下载更新器覆盖本地修改；除非用户同时明确要求同步安装副本，否则不扩展修改位置。
+
 
 Do not run the updater during ordinary tracking work. Do not mention update status, inspect `.update-state.json`, or contact GitHub unless the user explicitly asks to update, refresh, or check this Skill.
 

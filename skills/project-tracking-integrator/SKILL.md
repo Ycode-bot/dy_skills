@@ -71,7 +71,7 @@ node <skill-dir>/scripts/verify-tracking-source.mjs --root <project> --spec <con
 
 正式触发前检查场景依赖和会消耗的账号条件，先验证依赖场景，再执行使其失效的动作；先用只读查询预检确认平台可访问。无法满足的条件明确记录，不通过伪造业务状态绕过。具体流程与恢复命令见 [证据管理](references/evidence-management.md)。
 
-先校验旅程，操作时使用新鲜 DOM、唯一匹配及可见后置结果。禁止位置型 selector 或 `.first()` 绕过歧义。代码检查完成后触发正式业务旅程，记录固定时间窗。
+先校验旅程，操作时使用新鲜 DOM、唯一匹配及可见后置结果。禁止位置型 selector 或 `.first()` 绕过歧义。代码检查完成后触发正式业务旅程，记录固定时间窗。异步页面初始化、支付回调等场景，以最终业务结果观测完成作为窗口结束依据，不在点击完成或弹窗容器刚出现时提前结束。
 
 ```bash
 node <skill-dir>/scripts/run-browser-ingestion-verification.mjs --prepare
@@ -90,7 +90,8 @@ node <skill-dir>/scripts/run-browser-ingestion-verification.mjs --session <prepa
 - 字段只按契约验证；未声明最大次数不自行添加一次上限。明确零次且实际零次可通过。
 - 查询失败、截断、无数据、字段错误和重复必须区分。任何失败或截断不能判通过。
 - 页面成功、发送证据、入库证据分开记录。SDK 全局对象不可见不证明未发送；只有真实捕获面才可判断发送结果。
-- 浏览器 runner 默认等待 240 秒，只有结果全部为通过或未找到且至少一项未找到时，再等待 240 秒重查一次；最多两次查询、单次等待上限 1800 秒。重查固定窗口不变，不重复页面操作。长等待期间使用非阻塞会话保持可响应。
+- 浏览器 runner 的固定时间窗、等待、重查、进度和产物策略按 [browser-verification.md](references/browser-verification.md) 执行；不要在其他阶段另行计算相对时间窗或重复触发页面。
+- 关联事件断言、`--resume`、多轮报告选择和窗口补查分别按 [evidence-management.md](references/evidence-management.md) 与 [evidence-review.md](references/evidence-review.md) 执行；字段漂移、重复歧义和查询截断不能靠重试掩盖。
 - 指定环境独立验收，不自动升级生产。仅请求多环境时应用 [environment-gates.md](references/environment-gates.md)；生产仍需安全范围及明确授权。
 - runner 当前只处理神策 required 目标。其他目标按其真实能力单独验收和合并，不用神策结果替代，也不为通过而删掉 required 目标。
 
@@ -104,10 +105,12 @@ node <skill-dir>/scripts/run-browser-ingestion-verification.mjs --session <prepa
 
 统一中文结果由 `scripts/reporting.mjs` 提供；内部 JSON 保留兼容状态码及中文说明。默认不向用户堆放临时契约和查询文件。runner 成功后暂留最小汇总证据，失败保留原始输入、诊断和可恢复会话；只有用户要求时保留全部中间产物。
 
-完整闭环交付：实现内容、业务影响、文档位置、浏览器和平台结果、已修复问题及残留限制。单独阶段只交付本次范围。所有必需阶段通过才称“闭环验收通过”。完整闭环合并证据使用 `scripts/generate-tracking-report.mjs --mode full-lifecycle --development <development-report.json>`，同时传入契约和本次阶段报告；具体原因必须保留，不能只提示查看其他报告。统计明确为验收场景及实际覆盖条件；未执行、条件缺失、查询故障与验证失败分开说明。多轮失败不得被后来通过静默覆盖；跨事件归因按契约关联规则验收。GA/GTM 手工验证证据也使用相同事件 id、平台及环境记录，不伪造证据。
+完整闭环交付：实现内容、业务影响、文档位置、浏览器和平台结果、已修复问题及残留限制。单独阶段只交付本次范围。所有必需阶段通过才称“闭环验收通过”。完整闭环合并证据使用 `scripts/generate-tracking-report.mjs --mode full-lifecycle --development <development-report.json>`，同时传入契约和本次阶段报告；具体原因必须保留，不能只提示查看其他报告。统计单位是验收场景及实际覆盖条件；未执行、条件缺失、查询故障与验证失败分开说明。跨事件归因按契约关联规则验收；其他平台手工证据使用相同事件 id、平台及环境记录。
+
+多轮报告、失败历史、补查复核和最终结论同步按 [evidence-review.md](references/evidence-review.md) 处理；账号条件和实际覆盖范围按 [evidence-management.md](references/evidence-management.md) 记录。SDK/请求是否作为必需阶段由契约决定。
 
 ## 更新
 
 普通工作不运行或提及更新器，不读取更新状态或联系 GitHub。仅用户明确要求更新或检查此 skill 时读 [updating.md](references/updating.md)。
 
-成功后将会话内 `browser-evidence.json`、`ingestion-evidence.json` 分别作为汇总器的 `--browser`、`--ingestion` 输入。最终汇总报告写入并确认可读取后，再执行 `node scripts/run-browser-ingestion-verification.mjs --cleanup --session <会话目录>`；汇总失败时保留证据以便恢复。无需 `--keep-artifacts` 即可完成正常闭环。
+成功后的证据汇总、报告确认和会话清理按 [browser-verification.md](references/browser-verification.md) 的产物策略执行。

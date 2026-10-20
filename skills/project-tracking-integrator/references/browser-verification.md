@@ -209,11 +209,9 @@ Version 3 浏览器报告至少包含逐步定位证据和可合并的事件结�
 
 只有浏览器旅程达到预期且平台入库契约通过时，`browser-verify` 才能返回最终 `PASS`。控制台日志未提供时可标记 `NOT_AVAILABLE`，但不能因此跳过平台查询。
 
-成功后将会话内 `browser-evidence.json`、`ingestion-evidence.json` 分别作为汇总器的 `--browser`、`--ingestion` 输入。最终汇总报告写入并确认可读取后，再执行 `node scripts/run-browser-ingestion-verification.mjs --cleanup --session <会话目录>`；汇总失败时保留证据以便恢复。无需 `--keep-artifacts` 即可完成正常闭环。
-
 ## 状态依赖与证据恢复
 
-执行前置检查、追加逐步证据、跨事件断言、故障恢复及多轮汇总，见 [证据管理](evidence-management.md)。失败会话保留原始输入供修正；不得把未知字段扩散到汇总报告。
+执行前置检查、账号条件、逐步证据、跨事件断言和 `--resume` 恢复见 [evidence-management.md](evidence-management.md)；多轮报告选择和 `--review` 见 [evidence-review.md](evidence-review.md)。本文件只规定浏览器会话、runner 等待和产物清理。
 
 ## 等待与查询进度
 

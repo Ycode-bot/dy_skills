@@ -384,7 +384,7 @@ test('page evidence cannot replace required runtime evidence', () => {
     assert.notEqual(buildReport(input).status,'PASS');
     input.browser.results[0].pageStatus='PASS';
     assert.equal(buildReport(input).status,'PASS');
-    assert.match(formatMarkdown(buildReport(input)),/发送证据当前无法获取/);
+    assert.match(formatMarkdown(buildReport(input)),/未直接捕获 SDK\/请求/);
     input.contract.events[0].validation.environments.local.evidence.push('runtime');
     assert.notEqual(buildReport(input).status,'PASS');
     input.runtime=structuredClone(input.browser);

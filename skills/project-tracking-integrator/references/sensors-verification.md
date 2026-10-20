@@ -226,20 +226,7 @@ node scripts/verify-sensors-events.mjs \
   --out /tmp/sensors-verification.md
 ```
 
-浏览器自动验收不要使用查询时刻向前计算的相对窗口。默认使用 Version 3 单 bundle 和统一 runner，让它校验浏览器证据、等待入库并最多条件重查一次：
-
-```bash
-node scripts/run-browser-ingestion-verification.mjs \
-  --session <prepared-session-directory>
-```
-
-浏览器报告必须包含环境字段、固定 `triggerWindow`、逐步 locator 唯一性证据和事件覆盖结果。runner 默认等待 240 秒初查；仅在结果由 `PASS`/`NOT_FOUND` 组成且至少包含一个 `NOT_FOUND` 时延迟重查一次。两次查询复用同一报告和同一 SQL 时间边界，不能重新计算“最近 1 分钟/2 分钟”，也不能重新触发浏览器动作。对于没有浏览器报告的纯数据查询，才使用 `--since-minutes`。
-
-该 runner 只验收当前环境中 required 的神策目标，Journey 的 `covers` 也只能引用这些目标。契约若还包含 required 的 GA4、GTM 或 Google Ads 目标，或 `covers` 指向当前环境会被跳过的神策目标，会返回 `BLOCKED`，避免把神策通过误写成全平台通过；需要改用对应平台的独立验证流程。
-
-`verify-sensors-events.mjs --browser-report` 仍是 runner 内部使用的确定性单次查询接口；日常 `browser-verify` 不要手工调用两遍，也不要手工创建多份 ingestion report。
-
-浏览器能够完成业务动作、但页面全局 SDK handle 在自动化上下文中不可见时，不要判定 `NOT_SENT`，也不要跳过查询。直接按环境、事件和覆盖该动作的时间窗获取候选数据，再在本地用稳定 `match` 关联业务动作。
+浏览器自动验收的 bundle、固定触发窗口、等待、重查和 required 目标门禁统一由 [browser-verification.md](browser-verification.md) 及 runner 维护；本文件只说明神策查询和结果比较。没有浏览器报告的纯数据查询才使用 `--since-minutes`。
 
 部署方明确使用 Bearer 时：
 
@@ -319,6 +306,4 @@ SQL 的包含条件只用于预筛选；统计前必须精确比较 URL.host，�
 
 本文英文状态仅为内部协议标识，用户报告一律使用中文名称并说明原因。
 
-## 状态依赖与证据恢复
-
-执行前置检查、追加逐步证据、跨事件断言、故障恢复及多轮汇总，见 [证据管理](evidence-management.md)。失败会话保留原始输入供修正；不得把未知字段扩散到汇总报告。
+状态依赖、账号条件、查询预检、`--resume` 和多轮证据恢复见 [evidence-management.md](evidence-management.md) 与 [evidence-review.md](evidence-review.md)。

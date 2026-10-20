@@ -1,3 +1,4 @@
+import { validateReviews, selectReviewedEvidence, reviewWindowMatches } from './evidence-review.mjs';
 import { isEntrypoint, translateDiagnostic, humanizeReport, withChineseLabels, issueDetails, formatIssue, statusLabel } from './reporting.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -18,6 +19,7 @@ const HELP = `埋点验收报告汇总
 --development <report.json>：业务影响与文档证据。
 --scan <report.json>：体系扫描。
 --source / --browser / --runtime / --ingestion <report.json>：对应阶段报告，可重复传入。
+--review <review.json>：明确选择补查证据、解决旧结论及复核窗口；保留历史，不直接指定通过状态。
 --format markdown|json：默认中文 Markdown；--out 保存文件；--help 显示帮助。
 `;
 
@@ -29,10 +31,10 @@ function usage(message) {
 
 function parseArgs(argv) {
     const options = {
-        spec: '', scan: '', mode: 'full-lifecycle', development: '', source: [], browser: [], runtime: [], ingestion: [], format: 'markdown', out: '', help: false,
+        spec: '', scan: '', mode: 'full-lifecycle', development: '', review: '', source: [], browser: [], runtime: [], ingestion: [], format: 'markdown', out: '', help: false,
     };
     const repeatable = new Set(['--source', '--browser', '--runtime', '--ingestion']);
-    const single = new Set(['--spec', '--scan', '--format', '--out', '--mode', '--development']);
+    const single = new Set(['--spec', '--scan', '--format', '--out', '--mode', '--development', '--review']);
     for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
         if (arg === '--help') {
@@ -272,7 +274,7 @@ function buildGates(results) {
     return gates;
 }
 
-function buildReport({ contract, scan = null, source = null, browser = null, runtime = null, ingestion = null, mode = 'legacy', development = null }) {
+function buildReport({ contract, scan = null, source = null, browser = null, runtime = null, ingestion = null, mode = 'legacy', development = null, review = null }) {
     const sourceReports = asReports(source);
     const browserReports = asReports(browser);
     const runtimeReports = asReports(runtime);
@@ -284,11 +286,15 @@ function buildReport({ contract, scan = null, source = null, browser = null, run
         contract,
         requireEnvironmentEvidence: true,
     });
-    const results = contractRows(contract, mode).map(row => {
+    const rows = contractRows(contract, mode);
+    const resolutions = validateReviews(review, rows);
+    const reportsByStage = { source: sourceReports, browser: browserReports, runtime: runtimeReports, ingestion: ingestionReports };
+    const results = rows.map(row => {
         const result = {
             ...row,
             issues: [],
             evidenceDetails: {},
+            reviewHistory: [],
             requirement: row.targetStatus === 'unknown' || row.environmentStatus === 'unknown'
                 || (row.environment === 'production' && row.smokeSafe !== true)
                 ? 'BLOCKED'
@@ -305,6 +311,16 @@ function buildReport({ contract, scan = null, source = null, browser = null, run
                 fallbackPlatform: stage === 'ingestion' && row.platform === 'sensors' ? 'sensors' : '',
                 allowGlobal: stage === 'source',
             });
+            const resolution = resolutions.find(item => item.id === row.id && item.platform === row.platform && item.environment === row.environment && item.stage === stage);
+            const reviewed = selectReviewedEvidence({ resolution, reports: reportsByStage[stage], row, stage, contract,
+                select: report => stageEvidence(resultMap([report], stage === 'ingestion' ? 'sensors' : '', {
+                    contract, requireEnvironmentEvidence: stage === 'ingestion',
+                }), row, { allowGlobal: stage === 'source' }),
+            });
+            if (reviewed) {
+                selectedEvidence[stage] = reviewed;
+                result.reviewHistory.push({ stage, ...resolution, previousResults: reviewed.history });
+            }
             result[stage] = selectedEvidence[stage]?.result.status || 'NOT_RUN';
             const selected = selectedEvidence[stage]?.result;
             if (stage === 'source' && mode === 'full-lifecycle' && selected?.scope === 'method') {
@@ -338,9 +354,14 @@ function buildReport({ contract, scan = null, source = null, browser = null, run
             const ingested = result.evidenceDetails.ingestion;
             const trigger = browserEvidence?.triggerWindow;
             const queryWindow = ingested?.queryWindow;
+            const reviewedWindow = reviewWindowMatches(selectedEvidence.ingestion?.resolution, trigger, queryWindow);
             if (!trigger?.startedAt || !trigger?.finishedAt || !queryWindow?.startedAt || !queryWindow?.finishedAt
                 || Date.parse(trigger.startedAt) !== Date.parse(queryWindow.startedAt)
                 || Date.parse(trigger.finishedAt) !== Date.parse(queryWindow.finishedAt)) {
+                if (reviewedWindow) {
+                    result.status = finalStatus(result);
+                    return result;
+                }
                 if (!FAILURE_STATUSES.has(result.ingestion) && result.ingestion !== 'BLOCKED') result.ingestion = 'NEEDS_REVIEW';
                 result.issues.push(issueDetails({ message: '浏览器触发窗口与入库查询窗口缺失或不一致，不能关联本轮验收', nextStep: '修复后用新窗口重跑浏览器及平台验收，并保留相同时间证据' }));
             }
@@ -429,14 +450,24 @@ function formatMarkdown(report) {
         if (report.architecture.risks.length > 0) lines.push(`- 扫描风险：${report.architecture.risks.length} 项`);
         lines.push('');
     }
+    const showRuntime = report.results.some(result => result.requiredEvidence.includes('runtime'));
     lines.push('## 事件验收', '',
-        '| 业务事件 | 平台 | 环境 | 需求 | 源码 | 浏览器 | SDK/请求 | 平台入库 | 最终结果 |',
-        '|---|---|---|---|---|---|---|---|---|');
+        `| 业务事件 | 平台 | 环境 | 需求 | 源码 | 浏览器 |${showRuntime ? ' SDK/请求 |' : ''} 平台入库 | 最终结果 |`,
+        `|---|---|---|---|---|---|${showRuntime ? '---|' : ''}---|---|`);
     for (const result of report.results) {
-        lines.push(`| ${result.businessEvent} | ${result.platform} | ${result.environment ? statusLabel(result.environment) : '-'} | ${result.requirement} | ${result.source} | ${result.evidenceDetails?.browser?.reason?.code === 'PRECONDITION_UNMET' ? '前置条件不满足' : result.browser} | ${result.evidenceDetails?.browser?.status === 'NOT_AVAILABLE' && result.runtime === 'NOT_REQUIRED' ? '未直接捕获（非必需门禁）' : result.runtime} | ${result.ingestion} | ${result.status} |`);
+        lines.push(`| ${result.businessEvent} | ${result.platform} | ${result.environment ? statusLabel(result.environment) : '-'} | ${result.requirement} | ${result.source} | ${result.evidenceDetails?.browser?.reason?.code === 'PRECONDITION_UNMET' ? '前置条件不满足' : result.browser} |${showRuntime ? ` ${result.runtime} |` : ''} ${result.ingestion} | ${result.status} |`);
     }
-    for (const result of report.results) {
-        if (result.evidenceDetails?.browser?.status === 'NOT_AVAILABLE') lines.push(`- ${result.id}：页面结果与发送证据分开记录；SDK/发送证据当前无法获取。`);
+    if (report.results.some(result => result.evidenceDetails?.browser?.status === 'NOT_AVAILABLE')) {
+        lines.push('- 部分场景未直接捕获 SDK/请求，页面结果与入库证据分别核验；是否阻塞以契约必需阶段为准。');
+    }
+    const reviewed = report.results.filter(result => result.reviewHistory?.length);
+    if (reviewed.length) {
+        lines.push('', '## 补查复核与历史', '');
+        for (const result of reviewed) for (const review of result.reviewHistory) {
+            lines.push(`- ${result.id}/${result.platform}/${result.environment}：${statusLabel(review.stage)}采用报告索引 ${review.reportIndex}；原因：${review.reason}；依据：${review.evidence.join('；')}。`);
+            for (const prior of review.previousResults) lines.push(`  - 原报告索引 ${prior.reportIndex}：${statusLabel(prior.status)}；${prior.issues.map(issue => typeof issue === 'string' ? issue : issue.message).join('；') || '原始检查记录保留'}。`);
+            if (review.windowReview) lines.push(`  - 窗口复核：${review.windowReview.reason}；同次操作依据：${review.windowReview.association}；证据：${review.windowReview.evidence.join('；')}。`);
+        }
     }
     if (report.recoveryHistory?.length) lines.push(`- 查询恢复历史：${report.recoveryHistory.length} 次先前运行（${report.recoveryHistory.map(run => statusLabel(run.status)).join('、')}），经原会话显式恢复后取得本轮结果。`);
     const conditions = [...new Set(report.results.flatMap(result => result.accountConditions || []))];
@@ -467,6 +498,7 @@ async function run(argv = process.argv.slice(2)) {
         contract: await readJson(options.spec),
         mode: options.mode,
         development: await readJson(options.development),
+        review: await readJson(options.review),
         scan: await readJson(options.scan),
         source: await readJsonList(options.source),
         browser: await readJsonList(options.browser),

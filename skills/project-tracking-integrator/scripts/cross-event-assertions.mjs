@@ -59,13 +59,14 @@ export function compareAssertions(contract, sources) {
                 group.set(id, [...(group.get(id) || []), row]);
             }
         }
-        if (hosts.size !== 1 || windows.size > 1) issues.push({ code: 'ENVIRONMENT_CONFLICT', message: '跨事件来源环境或时间窗口不一致，禁止混合比较' });
+        if (hosts.size > 1 || windows.size > 1) issues.push({ code: 'ENVIRONMENT_CONFLICT', message: '跨事件来源环境或时间窗口不一致，禁止混合比较' });
         for (const group of groups.values()) {
             const all = [];
             for (const id of rule.eventIds) {
                 const rows = group.get(id) || [];
                 const count = rule.counts?.[id];
-                if (!rows.length || count && (rows.length < count.min || count.max !== undefined && rows.length > count.max)) issues.push({ code: 'COUNT_MISMATCH', message: `${id} 在关联组内缺失或次数不符合要求` });
+                if (!rows.length) issues.push({ code: 'NOT_FOUND', message: `${id} 关联组内事件尚未到齐` });
+                else if (count && (rows.length < count.min || count.max !== undefined && rows.length > count.max)) issues.push({ code: 'COUNT_MISMATCH', message: `${id} 在关联组内缺失或次数不符合要求` });
                 if (!count && rows.length > 1) issues.push({ code: 'CORRELATION_AMBIGUOUS', message: `${id} 同一关联键有多条记录，需求未声明次数，不能唯一关联` });
                 if (rows.some(row => all.includes(row))) issues.push({ code: 'CORRELATION_AMBIGUOUS', message: '同一候选记录命中多个参与事件，请收紧 match' });
                 all.push(...rows);
@@ -75,6 +76,6 @@ export function compareAssertions(contract, sources) {
                     || all.some(row => !isDeepStrictEqual(property(row, key), property(all[0], key)))) issues.push({ code: 'CROSS_EVENT_MISMATCH', message: `关联字段 ${key} 缺失或不一致` });
             }
         }
-        return { id: rule.id, eventIds: rule.eventIds, status: issues.length ? 'CONTRACT_MISMATCH' : 'PASS', groupCount: groups.size, issues };
+        return { id: rule.id, eventIds: rule.eventIds, status: !issues.length ? 'PASS' : issues.every(issue => issue.code === 'NOT_FOUND') ? 'NOT_FOUND' : 'CONTRACT_MISMATCH', groupCount: groups.size, issues };
     });
 }
