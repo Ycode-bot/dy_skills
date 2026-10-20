@@ -197,7 +197,15 @@ function resultMap(reportValue, defaultPlatform = '', { contract = null, require
             if (!environmentMismatch && !environmentConflict && result.method === 'agent-review' && (!Array.isArray(result.evidence) || !result.evidence.length)) {
                 normalizedResult = { ...result, status: 'NEEDS_REVIEW', issues: [issueDetails({ message: '人工补查报告缺少可定位的证据', nextStep: '补充位置、检查过程及结论依据' })] };
             }
-            map.set(`${result.id}::${platform}::${environment}`, { result: normalizedResult, report });
+            const key = `${result.id}::${platform}::${environment}`;
+            const prior = map.get(key);
+            if (prior && prior.result.status !== normalizedResult.status) {
+                normalizedResult = { ...normalizedResult, status: FAILURE_STATUSES.has(prior.result.status) ? prior.result.status : FAILURE_STATUSES.has(normalizedResult.status) ? normalizedResult.status : 'NEEDS_REVIEW', issues: [
+                    ...(prior.result.issues || []), ...(normalizedResult.issues || []),
+                    issueDetails({ message: `多轮证据冲突：${prior.result.status} / ${result.status}，不能以后一份覆盖前一份`, nextStep: '查询故障请用原会话 --resume；业务修复重验请单独交付新轮结果并保留旧轮历史' }),
+                ] };
+            }
+            map.set(key, { result: normalizedResult, report });
             if (!platform) map.set(`${result.id}::::${environment}`, { result: normalizedResult, report });
         }
     }
@@ -312,6 +320,7 @@ function buildReport({ contract, scan = null, source = null, browser = null, run
         }
         for (const stage of row.requiredEvidence) {
             const item = selectedEvidence[stage]?.result;
+            if (item?.reason) result.issues.push(issueDetails({ message: `${item.reason.message}；条件由本轮操作改变：${item.reason.changedByRun ? '是' : '否'}`, nextStep: item.reason.recovery }));
             if (item) {
                 result.evidenceDetails[stage] = item;
                 if (item.event && item.event !== row.event) {
@@ -323,7 +332,8 @@ function buildReport({ contract, scan = null, source = null, browser = null, run
                 ? [{ message: `${statusLabel(stage)}：${statusLabel(result[stage])}`, nextStep: `补齐${statusLabel(stage)}证据后重新验收` }] : [];
             result.issues.push(...reasons.map(issue => ({ stage, ...issueDetails(typeof issue === 'string' ? { message: issue } : issue) })));
         }
-        if (mode === 'full-lifecycle') {
+        result.accountConditions = selectedEvidence.browser?.report.accountConditions || [];
+        if (mode === 'full-lifecycle' && result.browser === 'PASS' && result.ingestion !== 'NOT_RUN') {
             const browserEvidence = selectedEvidence.browser?.report;
             const ingested = result.evidenceDetails.ingestion;
             const trigger = browserEvidence?.triggerWindow;
@@ -362,6 +372,7 @@ function buildReport({ contract, scan = null, source = null, browser = null, run
         mode,
         developmentIssues,
         development,
+        recoveryHistory: ingestionReports.flatMap(report => report.recoveryHistory || []),
         generatedAt: new Date().toISOString(),
         status,
         architecture: scan ? {
@@ -393,7 +404,7 @@ function formatMarkdown(report) {
         report.mode === 'full-lifecycle' ? '# 埋点闭环验收报告' : '# 埋点阶段证据报告', '',
         `- 生成时间：${report.generatedAt}`,
         `- 总体状态：${report.status}`,
-        `- 通过：${report.summary.passed}/${report.summary.total}`,
+        `- 验收场景通过：${report.summary.passed}/${report.summary.total}`,
         `- 证据：架构扫描=${report.evidence.scan ? '有' : '无'}，源码=${report.evidence.source}，浏览器=${report.evidence.browser}，运行时=${report.evidence.runtime}，入库=${report.evidence.ingestion}`, '',
     ];
     if (Object.keys(report.gates).length > 0) {
@@ -422,11 +433,14 @@ function formatMarkdown(report) {
         '| 业务事件 | 平台 | 环境 | 需求 | 源码 | 浏览器 | SDK/请求 | 平台入库 | 最终结果 |',
         '|---|---|---|---|---|---|---|---|---|');
     for (const result of report.results) {
-        lines.push(`| ${result.businessEvent} | ${result.platform} | ${result.environment ? statusLabel(result.environment) : '-'} | ${result.requirement} | ${result.source} | ${result.browser} | ${result.runtime} | ${result.ingestion} | ${result.status} |`);
+        lines.push(`| ${result.businessEvent} | ${result.platform} | ${result.environment ? statusLabel(result.environment) : '-'} | ${result.requirement} | ${result.source} | ${result.evidenceDetails?.browser?.reason?.code === 'PRECONDITION_UNMET' ? '前置条件不满足' : result.browser} | ${result.evidenceDetails?.browser?.status === 'NOT_AVAILABLE' && result.runtime === 'NOT_REQUIRED' ? '未直接捕获（非必需门禁）' : result.runtime} | ${result.ingestion} | ${result.status} |`);
     }
     for (const result of report.results) {
         if (result.evidenceDetails?.browser?.status === 'NOT_AVAILABLE') lines.push(`- ${result.id}：页面结果与发送证据分开记录；SDK/发送证据当前无法获取。`);
     }
+    if (report.recoveryHistory?.length) lines.push(`- 查询恢复历史：${report.recoveryHistory.length} 次先前运行（${report.recoveryHistory.map(run => statusLabel(run.status)).join('、')}），经原会话显式恢复后取得本轮结果。`);
+    const conditions = [...new Set(report.results.flatMap(result => result.accountConditions || []))];
+    lines.push('', `- 已覆盖账号条件：${conditions.length ? conditions.join('；') : '未记录，不能推断覆盖全部分组或账号'}`);
     for (const issue of report.developmentIssues || []) lines.push(`- ${formatIssue(issue)}`);
     const incomplete = report.results.filter(result => result.status !== 'PASS');
     if (incomplete.length > 0) {

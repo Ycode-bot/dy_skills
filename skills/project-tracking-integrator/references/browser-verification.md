@@ -195,7 +195,7 @@ Version 3 浏览器报告至少包含逐步定位证据和可合并的事件结�
 }
 ```
 
-产物策略由 runner 统一处理：它只在 canonical marker-owned session 内原子写入，遇到 session、父目录或产物文件软链时立即拒绝，不跟随链接写到目录外。验收通过时只保留 marker、中文报告、`browser-evidence.json` 和 `ingestion-evidence.json`；失败时只保留 `final-report.md` 与 `debug-bundle.json`；只有用户明确要求调试时才传 `--keep-artifacts` 保留全部中间文件。不要把每次运行产生的契约、旅程、浏览器报告和每次查询结果作为用户可见交付物。
+产物策略由 runner 统一处理：它只在 canonical marker-owned session 内原子写入，遇到 session、父目录或产物文件软链时立即拒绝，不跟随链接写到目录外。验收通过时只保留 marker、中文报告、`browser-evidence.json` 和 `ingestion-evidence.json`；失败时保留原始输入、自有会话标识、`final-report.md` 与诊断，供 `--resume` 恢复；只有用户明确要求调试时才传 `--keep-artifacts` 保留全部中间文件。不要把每次运行产生的契约、旅程、浏览器报告和每次查询结果作为用户可见交付物。
 
 ## 7. 结果输出
 
@@ -210,3 +210,11 @@ Version 3 浏览器报告至少包含逐步定位证据和可合并的事件结�
 只有浏览器旅程达到预期且平台入库契约通过时，`browser-verify` 才能返回最终 `PASS`。控制台日志未提供时可标记 `NOT_AVAILABLE`，但不能因此跳过平台查询。
 
 成功后将会话内 `browser-evidence.json`、`ingestion-evidence.json` 分别作为汇总器的 `--browser`、`--ingestion` 输入。最终汇总报告写入并确认可读取后，再执行 `node scripts/run-browser-ingestion-verification.mjs --cleanup --session <会话目录>`；汇总失败时保留证据以便恢复。无需 `--keep-artifacts` 即可完成正常闭环。
+
+## 状态依赖与证据恢复
+
+执行前置检查、追加逐步证据、跨事件断言、故障恢复及多轮汇总，见 [证据管理](evidence-management.md)。失败会话保留原始输入供修正；不得把未知字段扩散到汇总报告。
+
+## 等待与查询进度
+
+runner 在 stderr 输出首次等待时长、查询开始、每轮结果、条件重查时长及最终状态；stdout 继续用于最终摘要。进度只含轮次、时长与状态计数，不输出凭证、原始 payload 或账号信息。Agent 使用非阻塞会话读取这些进度，阶段变化时向用户说明，不把静默等待描述成查询失败，也不另开高频查询。进度输出不改变固定窗口、等待时长、重试条件或查询次数。

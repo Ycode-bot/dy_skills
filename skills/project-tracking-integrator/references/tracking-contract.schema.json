@@ -3,7 +3,10 @@
   "$id": "https://example.invalid/project-tracking-integrator/tracking-contract.schema.json",
   "title": "Multi-platform tracking contract",
   "type": "object",
-  "required": ["version", "events"],
+  "required": [
+    "version",
+    "events"
+  ],
   "properties": {
     "version": {
       "const": 2
@@ -14,7 +17,11 @@
     "environments": {
       "type": "object",
       "propertyNames": {
-        "enum": ["local", "qa", "production"]
+        "enum": [
+          "local",
+          "qa",
+          "production"
+        ]
       },
       "additionalProperties": {
         "$ref": "#/$defs/environmentProfile"
@@ -25,6 +32,66 @@
       "minItems": 1,
       "items": {
         "$ref": "#/$defs/businessEvent"
+      }
+    },
+    "crossEventAssertions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "eventIds",
+          "groupBy",
+          "equalProperties"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "eventIds": {
+            "type": "array",
+            "minItems": 2,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "groupBy": {
+            "type": "string",
+            "minLength": 1
+          },
+          "equalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "counts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "min"
+              ],
+              "properties": {
+                "min": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "max": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -50,7 +117,10 @@
     },
     "environmentProfile": {
       "type": "object",
-      "required": ["startUrl", "query"],
+      "required": [
+        "startUrl",
+        "query"
+      ],
       "properties": {
         "startUrl": {
           "type": "string",
@@ -59,7 +129,10 @@
         },
         "query": {
           "type": "object",
-          "required": ["property", "operator"],
+          "required": [
+            "property",
+            "operator"
+          ],
           "properties": {
             "property": {
               "type": "string",
@@ -77,8 +150,16 @@
             }
           },
           "oneOf": [
-            { "required": ["value"] },
-            { "required": ["valueFrom"] }
+            {
+              "required": [
+                "value"
+              ]
+            },
+            {
+              "required": [
+                "valueFrom"
+              ]
+            }
           ],
           "additionalProperties": false
         }
@@ -87,7 +168,11 @@
     },
     "businessEvent": {
       "type": "object",
-      "required": ["id", "trigger", "targets"],
+      "required": [
+        "id",
+        "trigger",
+        "targets"
+      ],
       "properties": {
         "id": {
           "type": "string",
@@ -104,9 +189,15 @@
         "owner": {
           "type": "object",
           "properties": {
-            "page": { "type": "string" },
-            "component": { "type": "string" },
-            "service": { "type": "string" }
+            "page": {
+              "type": "string"
+            },
+            "component": {
+              "type": "string"
+            },
+            "service": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         },
@@ -116,10 +207,20 @@
         "deduplication": {
           "type": "object",
           "properties": {
-            "strategy": { "type": "string" },
-            "key": { "type": "string" },
-            "minCount": { "type": "integer", "minimum": 0 },
-            "maxCount": { "type": "integer", "minimum": 0 }
+            "strategy": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "minCount": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "maxCount": {
+              "type": "integer",
+              "minimum": 0
+            }
           },
           "additionalProperties": false
         },
@@ -127,7 +228,12 @@
           "type": "object",
           "minProperties": 1,
           "propertyNames": {
-            "enum": ["sensors", "ga4", "gtm", "google_ads"]
+            "enum": [
+              "sensors",
+              "ga4",
+              "gtm",
+              "google_ads"
+            ]
           },
           "additionalProperties": {
             "$ref": "#/$defs/target"
@@ -139,7 +245,11 @@
             "environments": {
               "type": "object",
               "propertyNames": {
-                "enum": ["local", "qa", "production"]
+                "enum": [
+                  "local",
+                  "qa",
+                  "production"
+                ]
               },
               "additionalProperties": {
                 "$ref": "#/$defs/environmentRequirement"
@@ -153,16 +263,29 @@
     },
     "environmentRequirement": {
       "type": "object",
-      "required": ["status", "evidence"],
+      "required": [
+        "status",
+        "evidence"
+      ],
       "properties": {
         "status": {
-          "enum": ["required", "optional", "disabled", "unknown"]
+          "enum": [
+            "required",
+            "optional",
+            "disabled",
+            "unknown"
+          ]
         },
         "evidence": {
           "type": "array",
           "uniqueItems": true,
           "items": {
-            "enum": ["source", "browser", "runtime", "ingestion"]
+            "enum": [
+              "source",
+              "browser",
+              "runtime",
+              "ingestion"
+            ]
           }
         },
         "smokeSafe": {
@@ -173,20 +296,44 @@
     },
     "target": {
       "type": "object",
-      "required": ["status"],
+      "required": [
+        "status"
+      ],
       "properties": {
         "status": {
-          "enum": ["required", "optional", "disabled", "unknown"]
+          "enum": [
+            "required",
+            "optional",
+            "disabled",
+            "unknown"
+          ]
         },
-        "event": { "type": "string" },
-        "wrapper": { "type": "string" },
-        "sinceMinutes": { "type": "integer", "minimum": 1 },
-        "minCount": { "type": "integer", "minimum": 0 },
-        "maxCount": { "type": "integer", "minimum": 0 },
+        "event": {
+          "type": "string"
+        },
+        "wrapper": {
+          "type": "string"
+        },
+        "sinceMinutes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "minCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxCount": {
+          "type": "integer",
+          "minimum": 0
+        },
         "match": {
           "type": "object",
           "additionalProperties": {
-            "type": ["string", "number", "boolean"]
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
           }
         },
         "properties": {
@@ -198,8 +345,12 @@
         "validation": {
           "type": "object",
           "properties": {
-            "runtimeEvidence": { "type": "string" },
-            "ingestionEvidence": { "type": "string" }
+            "runtimeEvidence": {
+              "type": "string"
+            },
+            "ingestionEvidence": {
+              "type": "string"
+            }
           },
           "additionalProperties": false
         }
@@ -209,11 +360,15 @@
         {
           "if": {
             "properties": {
-              "status": { "const": "required" }
+              "status": {
+                "const": "required"
+              }
             }
           },
           "then": {
-            "required": ["event"]
+            "required": [
+              "event"
+            ]
           }
         }
       ]
@@ -221,9 +376,18 @@
     "propertyRule": {
       "type": "object",
       "properties": {
-        "required": { "type": "boolean" },
+        "required": {
+          "type": "boolean"
+        },
         "type": {
-          "enum": ["string", "number", "integer", "boolean", "array", "object"]
+          "enum": [
+            "string",
+            "number",
+            "integer",
+            "boolean",
+            "array",
+            "object"
+          ]
         },
         "equals": true,
         "oneOf": {

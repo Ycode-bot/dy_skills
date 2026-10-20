@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { isDeepStrictEqual } from 'node:util';
+import { validateAssertions, compareAssertions } from './cross-event-assertions.mjs';
 import { pathToFileURL } from 'node:url';
 
 const DEFAULT_QUERY_PATH = '/api/sql/query';
@@ -17,7 +18,7 @@ const DEFAULT_CREDENTIALS_FILE = path.join(os.homedir(), '.config', 'imastudio',
 const SENSITIVE_FIELD_PATTERN = /(token|secret|password|authorization|cookie|email|phone|mobile|account|userinfo|distinct[_-]?id)/i;
 const ENVIRONMENT_NAMES = new Set(['local', 'qa', 'production']);
 
-const HELP_TEXT = `神策事件验收
+const HELP_TEXT = `只读预检：--preflight --spec <契约> --environment <环境>，连接通过不作为入库证据。\n神策事件验收
 
 用法：
   node scripts/verify-sensors-events.mjs --spec <contract.json> --actual <events.json|ndjson>
@@ -104,6 +105,7 @@ function parseArgs(argv) {
             options.help = true;
             continue;
         }
+        if (arg === '--preflight') { options.preflight = true; options.query = true; continue; }
         if (arg === '--query') {
             options.query = true;
             continue;
@@ -588,7 +590,7 @@ function normalizeContract(raw, selectedEnvironment = '') {
         };
     });
 
-    return { version: raw.version || 1, environments: raw.environments || {}, events };
+    return { version: raw.version || 1, environments: raw.environments || {}, events, crossEventAssertions: validateAssertions(raw.crossEventAssertions, events) };
 }
 
 function getEventName(row) {
@@ -791,7 +793,15 @@ function buildComparisonReport(contract, sources) {
         return compareExpected(expected, source.rows, source);
     });
 
+    const correlations = compareAssertions(contract, sources);
+    for (const correlation of correlations.filter(item => item.status !== 'PASS')) {
+        for (const result of results.filter(item => correlation.eventIds.includes(item.id))) {
+            if (result.status === 'PASS') result.status = correlation.status;
+            result.issues.push(...correlation.issues.map(issue => ({ ...issue, message: `${correlation.id}: ${issue.message}` })));
+        }
+    }
     return {
+        correlations,
         generatedAt: new Date().toISOString(),
         summary: {
             total: results.length,
@@ -1072,6 +1082,7 @@ async function queryAllEvents(contract, options, env = process.env) {
                 const isolated = filterEnvironmentRows(rows, options);
                 cache.set(cacheKey, {
                     ...isolated,
+                    environmentProperty: options.environmentProperty || 'lmweb_url',
                     queriedRowCount: rows.length,
                     ...(isolated.invalidEnvironmentCount ? { error: '候选事件的环境 URL 缺失或无法解析，不能确认环境隔离；请检查公共 URL 字段' } : {}),
                     truncated: rows.length >= options.limit,
@@ -1147,6 +1158,15 @@ function formatDryRun(contract, options, env = process.env) {
     return humanizeReport(lines.join('\n'));
 }
 
+export async function preflightQuery(contract, options, env = process.env, query = querySensorsEvent) {
+    try {
+        await query(contract.events[0], { ...options, limit: 1 }, env);
+        return { kind: 'query-preflight', status: 'PASS', message: '只读查询连接、认证及权限通过；零条数据也可通过，不代表事件验收通过' };
+    } catch (error) {
+        return { kind: 'query-preflight', status: 'QUERY_FAILED', message: summarizeQueryFailure(error) };
+    }
+}
+
 async function run(argv = process.argv.slice(2), env = process.env) {
     let options = parseArgs(argv);
     validateOptions(options);
@@ -1188,6 +1208,14 @@ async function run(argv = process.argv.slice(2), env = process.env) {
         return 0;
     }
 
+    if (options.preflight) {
+        if (options.browserReport || options.startedAt || options.finishedAt || options.actual) fail('预检不能带正式触发窗口或离线数据');
+        const result = await preflightQuery(contract, options, env);
+        const output = options.format === 'json' ? JSON.stringify(result, null, 2) + '\n' : result.message + '\n';
+        if (options.out) await fs.writeFile(options.out, output, 'utf8');
+        else process.stdout.write(output);
+        return result.status === 'PASS' ? 0 : 1;
+    }
     const report = options.actual
         ? compareContract(contract, await readActualEvents(options.actual))
         : compareQueriedContract(contract, await queryAllEvents(contract, options, env));

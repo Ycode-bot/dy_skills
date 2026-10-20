@@ -33,8 +33,9 @@ const HELP_TEXT = `浏览器与神策入库验收
 先准备临时会话，填写契约、旅程及真实浏览器证据，再运行验收。
 可用 --journey、--spec、--browser-report 同时传入已有文件。
 --credentials / --profile 指定私有凭证配置；--limit 查询上限；--timeout-ms 查询超时。
---keep-artifacts 仅在明确要求调试时保留所有产物；默认通过后暂留汇总证据，失败保留中文报告和调试包。
+--keep-artifacts 仅在明确要求调试时保留所有产物；默认通过后暂留汇总证据，失败保留原始输入和可恢复会话。
 --cleanup --session <目录> 在最终汇总报告写入成功后清理本次自有会话。
+--resume --session <目录> 在故障解除后恢复原查询窗口，保留历次记录；不重新触发页面。
 --help 显示帮助。此 runner 不执行浏览器动作，不能代替登录和逐步证据采集。
 `;
 
@@ -65,6 +66,7 @@ function parseArgs(argv) {
     };
     const flags = new Map([
         ['--prepare', 'prepare'],
+        ['--resume', 'resume'],
         ['--cleanup', 'cleanup'],
         ['--help', 'help'],
         ['--keep-artifacts', 'keepArtifacts'],
@@ -160,18 +162,26 @@ async function runVerificationWorkflow({
     query,
     sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)),
     now = () => new Date(),
+    onProgress = () => {},
 }) {
+    const progress = message => {
+        try { onProgress(message); }
+        catch { /* 进度输出失败不改变验收结果。 */ }
+    };
     const policy = normalizeVerification(journey?.verification);
     const attempts = [];
     let delaySeconds = policy.ingestionWaitSeconds;
     for (let attempt = 1; attempt <= policy.maxQueryAttempts; attempt += 1) {
+        progress(`第 ${attempt} 轮：${attempt === 1 ? '首次等待入库' : '条件重查等待'} ${delaySeconds} 秒；沿用固定触发窗口。`);
         await sleep(delaySeconds * 1000);
+        progress(`第 ${attempt} 轮：开始查询平台数据。`);
         const queriedAt = isoNow(now);
         let report;
         try {
             report = await query({ attempt, queriedAt, specPath, browserReportPath });
         }
         catch (error) {
+            progress(`第 ${attempt} 轮：查询异常；验收${error.isUsageError ? '受阻' : '失败'}，停止本次运行。`);
             attempts.push({
                 attempt,
                 queriedAt,
@@ -191,12 +201,17 @@ async function runVerificationWorkflow({
             };
         }
         attempts.push(summarizeAttempt(attempt, queriedAt, delaySeconds, report));
+        const results = Array.isArray(report?.results) ? report.results : [];
+        const passed = results.filter(result => result.status === 'PASS').length;
+        const missing = results.filter(result => result.status === 'NOT_FOUND').length;
+        progress(`第 ${attempt} 轮结果：通过 ${passed} 项，未找到 ${missing} 项，其他未通过 ${results.length - passed - missing} 项。`);
         if (reportPassed(report)) break;
         if (attempt >= policy.maxQueryAttempts || !shouldRetryReport(report)) break;
         delaySeconds = policy.retryWaitSeconds;
     }
     const finalAttempt = attempts.length;
     const finalReport = attempts.at(-1)?.report || null;
+    progress(`验收结束：${reportPassed(finalReport) ? '检查通过' : '未通过'}，共查询 ${finalAttempt} 轮。`);
     return {
         schemaVersion: 1,
         status: reportPassed(finalReport) ? 'PASS' : 'FAILED',
@@ -559,6 +574,7 @@ function formatFinalReportMarkdown(workflow) {
         `- 首次等待： ${workflow.policy?.ingestionWaitSeconds ?? '-'} 秒`,
         `- 重查等待： ${workflow.policy?.retryWaitSeconds ?? '-'} 秒`,
     ];
+    if (workflow.previousRuns?.length) lines.push(`- 显式恢复：保留 ${workflow.previousRuns.length} 次历史运行；原触发窗口不变`);
     if (workflow.error) lines.push(`- 原因： ${translateDiagnostic(workflow.error)}`);
     lines.push(
         '',
@@ -585,6 +601,7 @@ async function collapseFailedSession(paths, debugBundle) {
         formatFinalReportMarkdown(debugBundle.workflow),
         ownedPaths.session,
     );
+    if (!await resolveOwnedSession(ownedPaths.session)) return { cleaned: false, collapsed: false, session: ownedPaths.session };
     await writeJson(ownedPaths.debugBundle, debugBundle, ownedPaths.session);
 
     ownedPaths = await resolveOwnedSession(ownedPaths.session);
@@ -643,8 +660,10 @@ async function finalizeSession({ paths, bundle, workflow, keepArtifacts = false 
     const debugBundle = workflow.inputValidation?.status === 'PASS'
         ? { workflow, ...bundle }
         : { workflow };
-    const collapsed = await collapseFailedSession(ownedPaths, debugBundle);
-    return { cleaned: false, collapsed, session: ownedPaths.session };
+    if (!await resolveOwnedSession(ownedPaths.session)) return { cleaned: false, collapsed: false, session: ownedPaths.session };
+    await writeJson(ownedPaths.debugBundle, debugBundle, ownedPaths.session);
+    // Invalid input remains private in the original bundle, never copied into diagnostics.
+    return { cleaned: false, collapsed: false, resumable: true, session: ownedPaths.session };
 }
 
 async function executeSession(options, dependencies = {}) {
@@ -652,10 +671,22 @@ async function executeSession(options, dependencies = {}) {
     let bundle = null;
     let workflow;
     let inputValidation = null;
+    let previous = null;
+    if (paths) {
+        try { previous = await readJson(paths.debugBundle, 'previous session'); }
+        catch (error) { if (error.cause?.code !== 'ENOENT' && await fs.stat(paths.debugBundle).then(() => true, () => false)) throw error; }
+        if (previous?.workflow && !options.resume) usage('已有失败记录；修正输入或解除查询故障后使用 --resume，保留原始触发窗口');
+    }
+    if (options.resume && !previous?.workflow) usage('--resume 需要现有失败会话');
     try {
         const resolved = await resolveSessionInputs(options);
         paths = resolved.paths;
         bundle = resolved.bundle;
+        if (previous?.workflow?.inputValidation?.status === 'PASS') {
+            for (const key of ['contract', 'journey', 'browserReport']) {
+                if (JSON.stringify(bundle[key]) !== JSON.stringify(previous[key])) { const error = new Error('恢复查询不能修改契约、旅程或触发窗口；新业务触发应创建新会话'); error.preserveSession = true; throw error; }
+            }
+        }
         const query = dependencies.query || createSingleQuery({
             paths,
             queryOptions: options,
@@ -678,11 +709,12 @@ async function executeSession(options, dependencies = {}) {
             query,
             sleep: dependencies.sleep,
             now: dependencies.now,
+            onProgress: dependencies.onProgress,
         });
         workflow.inputValidation = inputValidation;
     }
     catch (error) {
-        if (!paths) throw error;
+        if (!paths || error.preserveSession) throw error;
         let policy = null;
         try {
             policy = normalizeVerification(bundle?.journey?.verification);
@@ -700,6 +732,12 @@ async function executeSession(options, dependencies = {}) {
             inputValidation,
             error: error.message,
         };
+    }
+    if (previous?.workflow) {
+        workflow.previousRuns = [...(previous.workflow.previousRuns || []), { ...previous.workflow, previousRuns: undefined }];
+        if (workflow.finalReport) workflow.finalReport.recoveryHistory = workflow.previousRuns.map(run => ({
+            status: run.status, attempts: run.attempts, error: run.error,
+        }));
     }
     const artifacts = await finalizeSession({
         paths,
@@ -732,7 +770,10 @@ async function runCli(argv = process.argv.slice(2), dependencies = {}) {
     if (!options.session && !options.bundle && !options.journey && !options.spec && !options.browserReport) {
         usage('provide --session, --bundle, or explicit --journey/--spec/--browser-report');
     }
-    const result = await executeSession(options, dependencies);
+    const result = await executeSession(options, {
+        ...dependencies,
+        onProgress: dependencies.onProgress || (message => process.stderr.write(`[验收进度] ${message}\n`)),
+    });
     process.stdout.write(formatFinalReportMarkdown(result));
     if (result.artifacts?.browserEvidence) process.stdout.write(`浏览器汇总证据：${result.artifacts.browserEvidence}\n平台汇总证据：${result.artifacts.ingestionEvidence}\n最终报告写入成功后，使用 --cleanup --session 清理本次会话。\n`);
     return result.status === 'PASS' ? 0 : 1;

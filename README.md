@@ -21,6 +21,7 @@ npx skills add Ycode-bot/dy_skills@tinify-image-compressor -y -g
 npx skills add Ycode-bot/dy_skills@cloudflare-auto-deployer -y -g
 npx skills add Ycode-bot/dy_skills@project-tracking-integrator -y -g
 npx skills add Ycode-bot/dy_skills@imastudio-tencent-cos-uploader -y -g
+npx skills add Ycode-bot/dy_skills@22do-temp-mail -y -g
 ```
 
 Install all at once:
@@ -32,7 +33,8 @@ npx skills add Ycode-bot/dy_skills@workplace-viral-copywriter -y -g && \
 npx skills add Ycode-bot/dy_skills@tinify-image-compressor -y -g && \
 npx skills add Ycode-bot/dy_skills@cloudflare-auto-deployer -y -g && \
 npx skills add Ycode-bot/dy_skills@project-tracking-integrator -y -g && \
-npx skills add Ycode-bot/dy_skills@imastudio-tencent-cos-uploader -y -g
+npx skills add Ycode-bot/dy_skills@imastudio-tencent-cos-uploader -y -g && \
+npx skills add Ycode-bot/dy_skills@22do-temp-mail -y -g
 ```
 
 Verify installation:
@@ -50,6 +52,7 @@ ls ~/.agents/skills
 - `cloudflare-auto-deployer`: Detects whether a repo targets Cloudflare Pages or Workers, verifies credentials, prints safe Wrangler deployment plans, and can generate GitHub Actions workflows.
 - `project-tracking-integrator`: Discovers or establishes a multi-platform tracking system, implements data-team event contracts, and verifies source, runtime payloads, and platform ingestion.
 - `imastudio-tencent-cos-uploader`: Batch uploads local image, video, and audio files through ImaStudio's Tencent COS STS flow and writes a JSON file-to-URL manifest.
+- `22do-temp-mail`: Retrieves a temporary email account from 22.do and lists or reads received messages through its API.
 
 ## Skill Dependencies
 

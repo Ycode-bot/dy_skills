@@ -85,3 +85,13 @@ Ask for the source table or clarification only when missing content materially c
 - User identifiers or free-form content leaking into properties.
 - Server-side execution referencing `window`.
 - Documentation describing wrappers that no longer exist.
+
+## 判断业务是否缺失
+
+在完整开发中，只有完成以下相关核对后，才能提出“先实现业务再接埋点”：
+
+- 当前页面：检查用户指定入口及其弹窗、Tab、抽屉等实际可见结果；未定位时先记录“尚未定位”。需要导航或点击的探索仍遵守浏览器旅程与授权规则。
+- 代码调用链：从该入口追到组件、composable/store 和接口，检查响应式状态、动态挂载与不同设备分支，不能仅凭名称搜索无结果下结论。
+- 服务端策略：检查接口类型、既有合法响应证据及控制可见性的资格/实验逻辑；字段名称不同或当前账号被策略隐藏，不代表功能未实现。
+
+记录结论为“已实现且可达”“已实现但当前条件不可达”“尚未定位”或“确认缺失”，附对应位置与证据缺口。浏览器或响应证据不可获取时如实说明，不强行满足三项后才开展独立工作。仅源码任务不因此扩展为浏览器操作。确认缺失且确需改变业务后，才提出范围调整；仅某个埋点字段缺失时，单独处理该字段，不推断整段业务不存在。

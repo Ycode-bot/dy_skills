@@ -10,7 +10,7 @@ const ENVIRONMENTS = new Set(['local', 'qa', 'production']);
 const LOCATOR_ACTIONS = new Set(['click', 'hover', 'fill', 'select', 'press', 'scroll-into-view', 'expect-visible']);
 const EXPECTATION_ACTIONS = new Set(['click', 'hover']);
 const STEP_STATUSES = new Set(['PASS', 'FAILED', 'BLOCKED']);
-const RESULT_STATUSES = new Set(['PASS', 'FAILED', 'BLOCKED', 'NOT_AVAILABLE', 'NOT_SENT', 'CONTRACT_MISMATCH']);
+const RESULT_STATUSES = new Set(['PASS', 'FAILED', 'BLOCKED', 'NOT_AVAILABLE', 'NOT_SENT', 'CONTRACT_MISMATCH', 'NOT_RUN', 'QUERY_FAILED']);
 const EXPECTATION_TYPES = new Set(['visibleText', 'visibleElement', 'url', 'attribute', 'selected']);
 const REPORT_FIELDS = new Set([
     'version',
@@ -21,6 +21,7 @@ const REPORT_FIELDS = new Set([
     'triggerWindow',
     'steps',
     'results',
+    'accountConditions',
 ]);
 const TRIGGER_WINDOW_FIELDS = new Set(['startedAt', 'finishedAt']);
 const STEP_FIELDS = new Set([
@@ -33,11 +34,12 @@ const STEP_FIELDS = new Set([
     'executedAt',
     'resolvedElement',
     'expectation',
+    'reason',
 ]);
 const LOCATOR_FIELDS = new Set(['type', 'value', 'role', 'name', 'attribute', 'exact', 'scope']);
 const RESOLVED_ELEMENT_FIELDS = new Set(['role', 'name', 'href', 'scope']);
 const EXPECTATION_FIELDS = new Set(['type', 'status', 'value', 'locator', 'attribute']);
-const RESULT_FIELDS = new Set(['id', 'platform', 'status', 'method']);
+const RESULT_FIELDS = new Set(['id', 'platform', 'status', 'method', 'reason']);
 const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 
 function isObject(value) {
@@ -225,7 +227,7 @@ function isInsideWindow(value, triggerWindow) {
         && value.getTime() <= triggerWindow.finishedAt.getTime();
 }
 
-function validateSteps(report, journey, triggerWindow, issues) {
+function validateSteps(report, journey, triggerWindow, issues, partial = false) {
     if (!Array.isArray(journey.steps) || journey.steps.length === 0) {
         issues.push('journey.steps must contain at least one version 3 step');
         return;
@@ -269,7 +271,7 @@ function validateSteps(report, journey, triggerWindow, issues) {
         if (actual.id !== expected.id) issues.push(`${label}.id must equal journey step id ${expected.id}`);
         if (actual.action !== expected.action) issues.push(`${label}.action must equal journey action ${expected.action}`);
         if (!STEP_STATUSES.has(actual.status)) issues.push(`${label}.status must be PASS, FAILED, or BLOCKED`);
-        else if (actual.status !== 'PASS') issues.push(`${label}.status must be PASS before ingestion verification`);
+        else if (!partial && actual.status !== 'PASS') issues.push(`${label}.status must be PASS before ingestion verification`);
 
         let resolvedAt = null;
         if (LOCATOR_ACTIONS.has(expected.action)) {
@@ -330,12 +332,12 @@ function validateSteps(report, journey, triggerWindow, issues) {
     }
 }
 
-function validateResults(report, journey, issues) {
+function validateResults(report, journey, issues, partial = false) {
     if (!Array.isArray(report.results)) {
         issues.push('report.results must be an array');
         return;
     }
-    if (report.results.length === 0) issues.push('report.results must contain at least one result');
+    if (!partial && report.results.length === 0) issues.push('report.results must contain at least one result');
     const resultIds = new Set();
     report.results.forEach((result, index) => {
         if (!isObject(result) || !nonEmpty(result.id)) {
@@ -365,7 +367,7 @@ function validateResults(report, journey, issues) {
         }
         coveredIds.push(...step.covers);
     }
-    for (const id of coveredIds) {
+    for (const id of partial ? [] : coveredIds) {
         if (!nonEmpty(id)) {
             issues.push('journey step covers entries must be non-empty event ids');
         }
@@ -381,7 +383,7 @@ function validateResults(report, journey, issues) {
     }
 }
 
-export function validateBrowserReport(report, journey, contract = null) {
+export function validateBrowserReport(report, journey, contract = null, { partial = false } = {}) {
     const issues = [];
     if (!isObject(report)) return { status: 'INVALID', issues: ['report must be an object'] };
     if (!isObject(journey)) return { status: 'INVALID', issues: ['journey must be an object'] };
@@ -392,10 +394,22 @@ export function validateBrowserReport(report, journey, contract = null) {
     if (!nonEmpty(report.journeyName)) issues.push('report.journeyName is required');
     else if (report.journeyName !== journey.name) issues.push('report.journeyName must equal journey.name');
 
+    if (report.accountConditions !== undefined && (!Array.isArray(report.accountConditions) || report.accountConditions.some(value => !nonEmpty(value)))) issues.push('accountConditions 必须为非空描述字符串数组，不含账号标识');
+    for (const item of [...(Array.isArray(report.steps) ? report.steps : []), ...(Array.isArray(report.results) ? report.results : [])]) {
+        if (item?.reason === undefined) continue;
+        const reason = item.reason;
+        if (!isObject(reason) || !['NOT_EXECUTED', 'PRECONDITION_UNMET', 'QUERY_FAILURE', 'VALIDATION_FAILURE'].includes(reason.code)
+            || !nonEmpty(reason.message) || !nonEmpty(reason.recovery) || typeof reason.changedByRun !== 'boolean'
+            || Object.keys(reason).some(key => !['code', 'message', 'recovery', 'changedByRun'].includes(key))) issues.push('reason 需要合法 code、message、recovery 和 changedByRun');
+    }
+    if (partial) {
+        if (!Array.isArray(report.steps) || report.steps.length > journey.steps.length) issues.push('追加证据不能超过旅程步骤数');
+        journey = { ...journey, steps: journey.steps.slice(0, report.steps?.length || 0) };
+    }
     validateEnvironment(report, journey, contract, issues);
     const triggerWindow = validateTriggerWindow(report, issues);
-    validateSteps(report, journey, triggerWindow, issues);
-    validateResults(report, journey, issues);
+    validateSteps(report, journey, triggerWindow, issues, partial);
+    validateResults(report, journey, issues, partial);
 
     return {
         status: issues.length === 0 ? 'PASS' : 'INVALID',

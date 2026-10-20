@@ -39,6 +39,8 @@ description: 前端埋点开发与验收闭环。用于创建埋点体系、根�
 - ImaStudio 修改或源码验证前读 [imastudio-pattern.md](references/imastudio-pattern.md)。只查平台数据不因此展开源码审计。
 - 多平台需求读 [multi-platform-routing.md](references/multi-platform-routing.md)，不因存在多个 SDK 就双报。
 
+判断业务尚未实现前，按 [discovery.md](references/discovery.md) 核对当前页面入口、真实调用链和服务端策略；尚未定位或当前账号不可见，不等于业务缺失。需要浏览器验收的任务，在理解需求时按 [证据管理](references/evidence-management.md) 建立最小验收依赖矩阵，提前识别账号、设备及外部动作条件。
+
 明确事件、字段类型及来源、触发条件、成功证据、去重、目标平台和验收环境。脚本使用 [Version 2 契约](references/tracking-contract.schema.json)及[示例](references/tracking-contract.example.json)，简单需求不强制给用户输出契约文件。
 
 “示例、例如、参考值”不是固定要求，不可自动放入 `match`、`equals`、`oneOf`、`pattern` 或实现常量。只有明确绑定规则、本次测试值、被操作元素的稳定标识可关联同名事件。缺乏可靠关联依据时说明歧义，不假造判定条件。
@@ -66,6 +68,8 @@ node <skill-dir>/scripts/verify-tracking-source.mjs --root <project> --spec <con
 完整开发默认进入浏览器验收，独立操作使用 `browser-verify`。执行前读 [browser-verification.md](references/browser-verification.md)，按用户选择及可用能力选工具，优先复用合适的登录会话，不绑定某个插件名。
 
 需要登录但未登录时，请用户在选定的同一浏览器会话完成登录并回复“已登录”。收到回复后重新检查可见登录证据，成功后再继续。等待期间只做不依赖登录的工作。登录失效时暂停并恢复此流程；密码、验证码由用户处理，不读取 Cookie 或存储恢复凭证。若登录本身为待测事件，纳入正式旅程及触发窗口。
+
+正式触发前检查场景依赖和会消耗的账号条件，先验证依赖场景，再执行使其失效的动作；先用只读查询预检确认平台可访问。无法满足的条件明确记录，不通过伪造业务状态绕过。具体流程与恢复命令见 [证据管理](references/evidence-management.md)。
 
 先校验旅程，操作时使用新鲜 DOM、唯一匹配及可见后置结果。禁止位置型 selector 或 `.first()` 绕过歧义。代码检查完成后触发正式业务旅程，记录固定时间窗。
 
@@ -98,9 +102,9 @@ node <skill-dir>/scripts/run-browser-ingestion-verification.mjs --session <prepa
 
 ## 交付
 
-统一中文结果由 `scripts/reporting.mjs` 提供；内部 JSON 保留兼容状态码及中文说明。默认不向用户堆放临时契约和查询文件。runner 成功后暂留最小汇总证据，失败仅保留最终报告和调试包；只有用户要求时保留全部中间产物。
+统一中文结果由 `scripts/reporting.mjs` 提供；内部 JSON 保留兼容状态码及中文说明。默认不向用户堆放临时契约和查询文件。runner 成功后暂留最小汇总证据，失败保留原始输入、诊断和可恢复会话；只有用户要求时保留全部中间产物。
 
-完整闭环交付：实现内容、业务影响、文档位置、浏览器和平台结果、已修复问题及残留限制。单独阶段只交付本次范围。所有必需阶段通过才称“闭环验收通过”。完整闭环合并证据使用 `scripts/generate-tracking-report.mjs --mode full-lifecycle --development <development-report.json>`，同时传入契约和本次阶段报告；具体原因必须保留，不能只提示查看其他报告。GA/GTM 手工验证证据也使用相同事件 id、平台及环境记录，不伪造证据。
+完整闭环交付：实现内容、业务影响、文档位置、浏览器和平台结果、已修复问题及残留限制。单独阶段只交付本次范围。所有必需阶段通过才称“闭环验收通过”。完整闭环合并证据使用 `scripts/generate-tracking-report.mjs --mode full-lifecycle --development <development-report.json>`，同时传入契约和本次阶段报告；具体原因必须保留，不能只提示查看其他报告。统计明确为验收场景及实际覆盖条件；未执行、条件缺失、查询故障与验证失败分开说明。多轮失败不得被后来通过静默覆盖；跨事件归因按契约关联规则验收。GA/GTM 手工验证证据也使用相同事件 id、平台及环境记录，不伪造证据。
 
 ## 更新
 

@@ -400,7 +400,7 @@ test('default PASS cleanup removes only its marker-owned session', async t => {
     assert.equal(await fs.readFile(path.join(sibling, 'keep.txt'), 'utf8'), 'keep');
 });
 
-test('failure collapses a marker-owned session to final-report.md and debug-bundle.json', async t => {
+test('failure retains the owned session and original bundle for recovery', async t => {
     const temporaryRoot = await temporaryDirectory(t);
     const paths = await createOwnedSession({ temporaryRoot });
     await fs.writeFile(path.join(paths.session, 'attempt-1.json'), '{}', 'utf8');
@@ -412,8 +412,9 @@ test('failure collapses a marker-owned session to final-report.md and debug-bund
         finalReport: report('NOT_FOUND'),
     };
     const artifacts = await finalizeSession({ paths, bundle: defaultBundle(), workflow });
-    assert.equal(artifacts.collapsed, true);
-    assert.deepEqual((await fs.readdir(paths.session)).sort(), [DEBUG_BUNDLE_NAME, FINAL_REPORT_NAME].sort());
+    assert.equal(artifacts.collapsed, false);
+    await fs.access(paths.bundle);
+    assert.ok(await isOwnedSession(paths.session));
 });
 
 test('--keep-artifacts preserves all marker-owned session files', async t => {
@@ -554,7 +555,8 @@ test('executeSession blocks an invalid browser report before waiting or querying
     assert.equal(result.status, 'BLOCKED');
     assert.equal(slept, false);
     assert.equal(queried, false);
-    assert.deepEqual((await fs.readdir(paths.session)).sort(), [DEBUG_BUNDLE_NAME, FINAL_REPORT_NAME].sort());
+    await fs.access(paths.bundle);
+    assert.ok(await isOwnedSession(paths.session));
 });
 
 test('default failure artifacts do not retain rejected browser-report fields', async t => {
@@ -632,7 +634,7 @@ test('executeSession blocks covered events that the Sensors verifier would skip'
     assert.match(result.error, /requires every covered event to be a required Sensors target: optional-covered-event/);
 });
 
-test('executeSession collapses a malformed prepared bundle into a BLOCKED result', async t => {
+test('executeSession retains malformed input unchanged for correction', async t => {
     const temporaryRoot = await temporaryDirectory(t);
     const paths = await createOwnedSession({ temporaryRoot });
     await fs.writeFile(paths.bundle, '{invalid json', 'utf8');
@@ -641,7 +643,8 @@ test('executeSession collapses a malformed prepared bundle into a BLOCKED result
 
     assert.equal(result.status, 'BLOCKED');
     assert.match(result.error, /cannot read verification bundle/);
-    assert.deepEqual((await fs.readdir(paths.session)).sort(), [DEBUG_BUNDLE_NAME, FINAL_REPORT_NAME].sort());
+    await fs.access(paths.bundle);
+    assert.ok(await isOwnedSession(paths.session));
 });
 
 test('executeSession reports missing query configuration as BLOCKED', async t => {
@@ -657,7 +660,8 @@ test('executeSession reports missing query configuration as BLOCKED', async t =>
 
     assert.equal(result.status, 'BLOCKED');
     assert.match(result.error, /credentials are not configured/);
-    assert.deepEqual((await fs.readdir(paths.session)).sort(), [DEBUG_BUNDLE_NAME, FINAL_REPORT_NAME].sort());
+    await fs.access(paths.bundle);
+    assert.ok(await isOwnedSession(paths.session));
 });
 
 test('validated page evidence survives unavailable SDK visibility and artifact export', async t => {
