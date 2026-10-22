@@ -14,23 +14,21 @@ The STS endpoint is `GET /api/rest/cos/getststoken`. It uses query parameters an
 
 ## Query parameter handling
 
-The caller supplies a JSON object through `--params-file`. It must contain scalar `appId` and `appKey` values and may contain the remaining backend-required query fields, for example:
+The caller supplies a JSON object through `--params-file`. Only a non-empty string `cmimToken` is required. `appId` is fixed by `IMASTUDIO_APP_ID` in the uploader and overrides any legacy config value:
 
 ```json
 {
-  "appUid": "<user-id-if-required>",
-  "userId": "<user-id-if-required>",
-  "appId": "<app-id>",
-  "appKey": "<app-key>",
-  "cmimToken": "<token-if-required>"
+  "cmimToken": "<your-login-token>"
 }
 ```
 
+Existing scalar query fields remain supported for compatibility. If a non-empty `appKey` is supplied, the legacy signing flow is retained; with only `cmimToken`, no `sign`, `timestamp`, or `nonce` is sent. Actual gateway authorization is deployment-dependent and must be verified separately.
+
 Keep the real file outside Git. The CLI preserves caller-supplied scalar fields except for request-scoped fields. For each file it regenerates or sets:
 
-- `timestamp`: current Unix timestamp in seconds
-- `nonce`: 32 lowercase hexadecimal characters
-- `sign`: uppercase SHA-1 of `appId|appKey|timestamp|nonce`
+- When `appKey` is supplied, `timestamp`: current Unix timestamp in seconds
+- When `appKey` is supplied, `nonce`: 32 lowercase hexadecimal characters
+- When `appKey` is supplied, `sign`: uppercase SHA-1 of `appId|appKey|timestamp|nonce`
 - `fService`: always `private`
 - `fType`: `picture`, `video`, or `audio`
 - `fSuffix`: lowercase extension without the leading dot

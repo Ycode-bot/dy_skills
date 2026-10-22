@@ -6,6 +6,8 @@ import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
+export const IMASTUDIO_APP_ID = "webAgent";
+
 export const ENV_ENDPOINTS = Object.freeze({
   test: "https://imapi-qa.liveme.com",
   beta: "https://imapi-beta.liveme.com",
@@ -247,8 +249,8 @@ export async function readParamsFile(paramsFile) {
       throw new CliError(`parameter file field ${key} must be a scalar value`);
     }
   }
-  if (!String(parsed.appId || "").trim() || !String(parsed.appKey || "").trim()) {
-    throw new CliError("parameter file must include non-empty appId and appKey fields");
+  if (typeof parsed.cmimToken !== "string" || !parsed.cmimToken.trim()) {
+    throw new CliError("parameter file must include a non-empty cmimToken field");
   }
   return { ...parsed };
 }
@@ -274,10 +276,11 @@ export function buildStsQuery(baseQuery, item, requestContext = {}) {
 
   const timestamp = requestContext.timestamp ?? Math.floor(Date.now() / 1000);
   const nonce = requestContext.nonce ?? randomBytes(16).toString("hex");
-  const appId = String(query.appId || "");
+  const appId = IMASTUDIO_APP_ID;
+  query.appId = appId;
   const appKey = String(query.appKey || "");
-  if (!appId || !appKey) {
-    throw new CliError("STS query requires appId and appKey");
+  if (typeof query.cmimToken !== "string" || !query.cmimToken.trim()) {
+    throw new CliError("STS query requires cmimToken");
   }
 
   const suffix = path.extname(item.source).slice(1).toLowerCase();
@@ -287,9 +290,7 @@ export function buildStsQuery(baseQuery, item, requestContext = {}) {
     fType: item.type === "image" ? "picture" : item.type,
     fSuffix: suffix,
     fSize: String(item.size),
-    timestamp,
-    nonce,
-    sign: createRequestSign(appId, appKey, timestamp, nonce)
+    ...(appKey.trim() ? { timestamp, nonce, sign: createRequestSign(appId, appKey, timestamp, nonce) } : {})
   };
 }
 
@@ -348,7 +349,10 @@ export async function requestStsToken({ endpoint, query, signal, fetchImpl = glo
       throw new Error("STS response is not valid JSON");
     }
     if (!body || body.code !== 200) {
-      throw new Error(`STS request failed with code ${body?.code ?? "unknown"}`);
+      const code = body?.code ?? body?.status;
+      const safeCode = typeof code === "number" ? code : "unknown";
+      const hint = body?.msg === "authToken can not find cmimtoken" ? ": missing cmimToken" : "";
+      throw new Error(`STS request failed with code ${safeCode}${hint}`);
     }
     if (!body.data || typeof body.data !== "object") {
       throw new Error("STS response does not contain data");

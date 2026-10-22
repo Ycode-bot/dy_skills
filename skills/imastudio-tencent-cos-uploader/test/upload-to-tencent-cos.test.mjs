@@ -7,6 +7,7 @@ import test from "node:test";
 
 import {
   CliError,
+  IMASTUDIO_APP_ID,
   ENV_ENDPOINTS,
   buildStsQuery,
   createRequestSign,
@@ -84,12 +85,13 @@ test("reads scalar query parameters without accepting nested values", async () =
   const root = await createTemporaryDirectory();
   const validFile = path.join(root, "valid.json");
   const invalidFile = path.join(root, "invalid.json");
-  await fs.writeFile(validFile, JSON.stringify({ appId: "webAgent", appKey: "key", userId: "1" }));
+  await fs.writeFile(validFile, JSON.stringify({ appId: "webAgent", appKey: "key", cmimToken: "test-token", userId: "1" }));
   await fs.writeFile(invalidFile, JSON.stringify({ appId: "webAgent", appKey: "key", nested: {} }));
 
   assert.deepEqual(await readParamsFile(validFile), {
     appId: "webAgent",
     appKey: "key",
+    cmimToken: "test-token",
     userId: "1"
   });
   await assert.rejects(() => readParamsFile(invalidFile), /must be a scalar value/);
@@ -99,11 +101,11 @@ test("rebuilds request-scoped STS fields and computes the existing uppercase SHA
   const timestamp = 1_725_000_000;
   const nonce = "0123456789abcdef0123456789abcdef";
   const expected = createHash("sha1")
-    .update(`webAgent|app-key|${timestamp}|${nonce}`)
+    .update(`${IMASTUDIO_APP_ID}|app-key|${timestamp}|${nonce}`)
     .digest("hex")
     .toUpperCase();
 
-  assert.equal(createRequestSign("webAgent", "app-key", timestamp, nonce), expected);
+  assert.equal(createRequestSign(IMASTUDIO_APP_ID, "app-key", timestamp, nonce), expected);
   const query = buildStsQuery({
     appId: "webAgent",
     appKey: "app-key",
@@ -313,7 +315,7 @@ test("batch upload limits file concurrency, preserves order, and records partial
   const manifest = await runUploadBatch({
     items,
     env: "test",
-    baseQuery: { appId: "webAgent", appKey: "app-key" },
+    baseQuery: { cmimToken: "test-token", appKey: "app-key" },
     maxFiles: 2,
     chunkConcurrency: 2,
     signal: new AbortController().signal,
@@ -355,4 +357,17 @@ test("dry run performs no upload and writes a private JSON manifest atomically",
   assert.equal(saved.summary.planned, 1);
   assert.equal(saved.summary.skipped, 1);
   assert.equal(stat.mode & 0o077, 0);
+});
+
+test("accepts token-only configuration and omits legacy signing fields", async () => {
+  const directory = await createTemporaryDirectory();
+  const file = path.join(directory, "params.json");
+  await fs.writeFile(file, JSON.stringify({ cmimToken: "test-token" }));
+  const base = await readParamsFile(file);
+  const query = buildStsQuery({ ...base, appId: "cannot-override", sign: "stale", timestamp: 1, nonce: "stale" }, {
+    source: "photo.PNG", type: "image", size: 12
+  });
+  assert.deepEqual(query, { appId: IMASTUDIO_APP_ID, cmimToken: "test-token", fService: "private", fType: "picture", fSuffix: "png", fSize: "12" });
+  await fs.writeFile(file, JSON.stringify({ cmimToken: " " }));
+  await assert.rejects(readParamsFile(file), /cmimToken/);
 });
